@@ -158,7 +158,9 @@ def _current_config(context: ContextTypes.DEFAULT_TYPE) -> Tuple[int, int]:
 
 async def _load_history(context: ContextTypes.DEFAULT_TYPE) -> pd.DataFrame:
     """Load historical matches with better error handling."""
-    try:        _import_modules()        league_id, season = _current_config(context)
+    try:
+        _import_modules()
+        league_id, season = _current_config(context)
         source = ApiFootballDataSource(api_key=_get_api_key())
         matches = await asyncio.to_thread(source.get_historical_matches, league_id, season)
 
