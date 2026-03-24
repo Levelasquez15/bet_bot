@@ -70,6 +70,11 @@ jobs:
                 --min-replicas 1 \
                 --max-replicas 1
             else
+              az containerapp secret set \
+                --name "$CONTAINER_APP_NAME" \
+                --resource-group "$RESOURCE_GROUP" \
+                --secrets api-football-key='${{ secrets.API_FOOTBALL_KEY }}' telegram-bot-token='${{ secrets.TELEGRAM_TOKEN }}'
+
               az containerapp update \
                 --name "$CONTAINER_APP_NAME" \
                 --resource-group "$RESOURCE_GROUP" \
