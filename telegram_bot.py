@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import logging
 import os
 from datetime import datetime, date
 from typing import Dict, Tuple, List
@@ -10,10 +11,32 @@ import pandas as pd
 from telegram import Update
 from telegram.ext import Application, CommandHandler, ContextTypes
 
-from src.backtesting import Backtester
-from src.data_sources import ApiFootballDataSource
-from src.engine import PredictionEngine
-from src.recommender import BettingRecommender
+# Configure logging
+logging.basicConfig(
+    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
+    level=logging.INFO
+)
+logger = logging.getLogger(__name__)
+
+# Lazy imports to avoid scipy issues at startup
+Backtester = None
+ApiFootballDataSource = None
+PredictionEngine = None
+BettingRecommender = None
+
+def _import_modules():
+    """Lazy import of modules that depend on scipy."""
+    global Backtester, ApiFootballDataSource, PredictionEngine, BettingRecommender
+    if Backtester is None:
+        try:
+            from src.backtesting import Backtester
+            from src.data_sources import ApiFootballDataSource
+            from src.engine import PredictionEngine
+            from src.recommender import BettingRecommender
+            logger.info("Modules imported successfully")
+        except Exception as e:
+            logger.error(f"Failed to import modules: {e}")
+            raise
 
 load_dotenv()
 
@@ -135,8 +158,7 @@ def _current_config(context: ContextTypes.DEFAULT_TYPE) -> Tuple[int, int]:
 
 async def _load_history(context: ContextTypes.DEFAULT_TYPE) -> pd.DataFrame:
     """Load historical matches with better error handling."""
-    try:
-        league_id, season = _current_config(context)
+    try:        _import_modules()        league_id, season = _current_config(context)
         source = ApiFootballDataSource(api_key=_get_api_key())
         matches = await asyncio.to_thread(source.get_historical_matches, league_id, season)
 
@@ -155,6 +177,7 @@ def _predict_match_inline(home_team: str, away_team: str, matches: pd.DataFrame)
     if matches.empty:
         raise ValueError("No historical data available for predictions")
 
+    _import_modules()
     engine = PredictionEngine()
     played = matches.dropna(subset=["home_goals", "away_goals"]).copy()
 
@@ -421,6 +444,7 @@ async def cmd_comparar_lineas(update: Update, context: ContextTypes.DEFAULT_TYPE
 
 def _analyze_jornada_inline(matches: pd.DataFrame, fixtures_df: pd.DataFrame) -> Dict:
     """Analyze today's jornada matches."""
+    _import_modules()
     engine = PredictionEngine()
     recommender = BettingRecommender()
     source = ApiFootballDataSource(api_key=_get_api_key())
@@ -459,6 +483,7 @@ def _analyze_jornada_inline(matches: pd.DataFrame, fixtures_df: pd.DataFrame) ->
 
 def _build_accumulator_inline(matches: pd.DataFrame, fixtures_df: pd.DataFrame, legs: int) -> Dict:
     """Build accumulator with specified number of legs."""
+    _import_modules()
     engine = PredictionEngine()
     recommender = BettingRecommender()
     source = ApiFootballDataSource(api_key=_get_api_key())
@@ -589,12 +614,14 @@ async def cmd_backtest(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
 
 def _analyze_next_inline(matches: pd.DataFrame, league_id: int, season: int, n: int) -> Dict:
     """Analyze next n fixtures (legacy function, kept for compatibility)."""
+    _import_modules()
     source = ApiFootballDataSource(api_key=_get_api_key())
     fixtures_df = source.get_upcoming_fixtures(league_id=league_id, season=season, next_n=n)
     return _analyze_jornada_inline(matches, fixtures_df)
 
 
 def _backtest_inline(matches: pd.DataFrame, min_history: int) -> Dict[str, float]:
+    _import_modules()
     engine = PredictionEngine()
     bt = Backtester(engine)
     result = bt.run_rolling(matches, min_history=min_history)
@@ -602,24 +629,33 @@ def _backtest_inline(matches: pd.DataFrame, min_history: int) -> Dict[str, float
 
 
 def main() -> None:
-    token = _get_telegram_token()
+    try:
+        logger.info("Starting BetBot...")
+        token = _get_telegram_token()
+        logger.info("Telegram token loaded successfully")
 
-    app = Application.builder().token(token).build()
+        app = Application.builder().token(token).build()
 
-    # Register commands
-    app.add_handler(CommandHandler("start", cmd_start))
-    app.add_handler(CommandHandler("help", cmd_start))
-    app.add_handler(CommandHandler("status", cmd_status))
-    app.add_handler(CommandHandler("setleague", cmd_setleague))
-    app.add_handler(CommandHandler("partido", cmd_predict))  # Changed from predict
-    app.add_handler(CommandHandler("jornada", cmd_jornada))  # New command
-    app.add_handler(CommandHandler("combinada", cmd_combinada))  # New command
-    app.add_handler(CommandHandler("comparar_lineas", cmd_comparar_lineas))  # New command
-    app.add_handler(CommandHandler("analyze_next", cmd_analyze_next))
-    app.add_handler(CommandHandler("backtest", cmd_backtest))
+        # Register commands
+        app.add_handler(CommandHandler("start", cmd_start))
+        app.add_handler(CommandHandler("help", cmd_start))
+        app.add_handler(CommandHandler("status", cmd_status))
+        app.add_handler(CommandHandler("setleague", cmd_setleague))
+        app.add_handler(CommandHandler("partido", cmd_predict))  # Changed from predict
+        app.add_handler(CommandHandler("jornada", cmd_jornada))  # New command
+        app.add_handler(CommandHandler("combinada", cmd_combinada))  # New command
+        app.add_handler(CommandHandler("comparar_lineas", cmd_comparar_lineas))  # New command
+        app.add_handler(CommandHandler("analyze_next", cmd_analyze_next))
+        app.add_handler(CommandHandler("backtest", cmd_backtest))
 
-    print("🤖 BetBot iniciado. Esperando mensajes...")
-    app.run_polling(allowed_updates=Update.ALL_TYPES)
+        logger.info("🤖 BetBot iniciado. Esperando mensajes...")
+        print("🤖 BetBot iniciado. Esperando mensajes...")
+        app.run_polling(allowed_updates=Update.ALL_TYPES)
+
+    except Exception as e:
+        logger.error(f"Failed to start bot: {e}")
+        print(f"❌ Error al iniciar el bot: {e}")
+        raise
 
 
 if __name__ == "__main__":
