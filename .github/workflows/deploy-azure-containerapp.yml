@@ -17,7 +17,7 @@ jobs:
       - name: Build and deploy Container App
         uses: azure/container-apps-deploy-action@v1
         with:
-          creds: ${{ secrets.AZURE_CREDENTIALS }}
+          azureCredentials: ${{ secrets.AZURE_CREDENTIALS }}
           resourceGroup: ${{ vars.AZURE_RESOURCE_GROUP }}
           imageToDeploy: ${{ vars.ACR_LOGIN_SERVER }}/bet-bot:${{ github.sha }}
           containerAppName: ${{ vars.CONTAINER_APP_NAME }}
