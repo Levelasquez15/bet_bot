@@ -9,38 +9,18 @@ on:
 jobs:
   deploy:
     runs-on: ubuntu-latest
-    env:
-      ACR_NAME: ${{ vars.ACR_NAME }}
-      ACR_LOGIN_SERVER: ${{ vars.ACR_LOGIN_SERVER }}
-      RESOURCE_GROUP: ${{ vars.AZURE_RESOURCE_GROUP }}
-      CONTAINER_APP_NAME: ${{ vars.CONTAINER_APP_NAME }}
 
     steps:
       - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Azure Login
-        uses: azure/login@v2
+      - name: Build and deploy Container App
+        uses: azure/container-apps-deploy-action@v1
         with:
           creds: ${{ secrets.AZURE_CREDENTIALS }}
-
-      - name: Build Image in ACR
-        uses: azure/cli@v2
-        with:
-          inlineScript: |
-            az acr build \
-              --registry "$ACR_NAME" \
-              --image "bet-telegram-bot:${{ github.sha }}" \
-              .
-
-      - name: Deploy Latest Image to Container App
-        uses: azure/cli@v2
-        with:
-          inlineScript: |
-            IMAGE="$ACR_LOGIN_SERVER/bet-telegram-bot:${{ github.sha }}"
-
-            az containerapp update \
-              --name "$CONTAINER_APP_NAME" \
-              --resource-group "$RESOURCE_GROUP" \
-              --image "$IMAGE" \
-              --set-env-vars API_FOOTBALL_KEY=secretref:api-football-key TELEGRAM_TOKEN=secretref:telegram-bot-token TELEGRAM_BOT_TOKEN=secretref:telegram-bot-token
+          resourceGroup: ${{ vars.AZURE_RESOURCE_GROUP }}
+          imageToDeploy: ${{ vars.ACR_LOGIN_SERVER }}/bet-bot:${{ github.sha }}
+          containerAppName: ${{ vars.CONTAINER_APP_NAME }}
+          acrName: ${{ vars.ACR_NAME }}
+          acrUsername: ${{ secrets.ACR_USERNAME }}
+          acrPassword: ${{ secrets.ACR_PASSWORD }}
