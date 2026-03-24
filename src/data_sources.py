@@ -55,24 +55,61 @@ class ApiFootballDataSource:
         return response.json()
 
     def get_historical_matches(self, league_id: int, season: int) -> pd.DataFrame:
-        payload = self._get("/fixtures", {"league": league_id, "season": season, "status": "FT"})
-        rows = []
-        for item in payload.get("response", []):
-            goals = item.get("goals") or {}
-            fixture = item.get("fixture") or {}
-            teams = item.get("teams") or {}
-            rows.append(
-                {
-                    "date": fixture.get("date"),
-                    "home_team": (teams.get("home") or {}).get("name"),
-                    "away_team": (teams.get("away") or {}).get("name"),
-                    "home_goals": goals.get("home"),
-                    "away_goals": goals.get("away"),
-                }
-            )
+        """Get historical matches with fallback to previous seasons if needed."""
+        current_season = season
 
-        df = pd.DataFrame(rows)
-        return normalize_matches(df)
+        # Try current season first
+        try:
+            payload = self._get("/fixtures", {"league": league_id, "season": current_season, "status": "FT"})
+            rows = []
+            for item in payload.get("response", []):
+                goals = item.get("goals") or {}
+                fixture = item.get("fixture") or {}
+                teams = item.get("teams") or {}
+                rows.append(
+                    {
+                        "date": fixture.get("date"),
+                        "home_team": (teams.get("home") or {}).get("name"),
+                        "away_team": (teams.get("away") or {}).get("name"),
+                        "home_goals": goals.get("home"),
+                        "away_goals": goals.get("away"),
+                    }
+                )
+
+            df = pd.DataFrame(rows)
+            if not df.empty:
+                return normalize_matches(df)
+        except Exception as e:
+            print(f"Warning: Failed to get data for season {current_season}: {e}")
+
+        # Fallback to previous season if current season has no data
+        if current_season > 2020:
+            try:
+                print(f"Falling back to season {current_season - 1}")
+                payload = self._get("/fixtures", {"league": league_id, "season": current_season - 1, "status": "FT"})
+                rows = []
+                for item in payload.get("response", []):
+                    goals = item.get("goals") or {}
+                    fixture = item.get("fixture") or {}
+                    teams = item.get("teams") or {}
+                    rows.append(
+                        {
+                            "date": fixture.get("date"),
+                            "home_team": (teams.get("home") or {}).get("name"),
+                            "away_team": (teams.get("away") or {}).get("name"),
+                            "home_goals": goals.get("home"),
+                            "away_goals": goals.get("away"),
+                        }
+                    )
+
+                df = pd.DataFrame(rows)
+                if not df.empty:
+                    return normalize_matches(df)
+            except Exception as e:
+                print(f"Warning: Failed to get data for fallback season {current_season - 1}: {e}")
+
+        # Return empty DataFrame if no data found
+        return pd.DataFrame(columns=REQUIRED_MATCH_COLUMNS)
 
     def get_upcoming_fixtures(self, league_id: int, season: int, next_n: int = 10) -> pd.DataFrame:
         payload = self._get(
@@ -186,6 +223,10 @@ def load_matches_from_csv(path: str) -> pd.DataFrame:
 
 
 def normalize_matches(df: pd.DataFrame) -> pd.DataFrame:
+    """Normalize match data with better error handling."""
+    if df.empty:
+        return pd.DataFrame(columns=REQUIRED_MATCH_COLUMNS)
+
     missing = [col for col in REQUIRED_MATCH_COLUMNS if col not in df.columns]
     if missing:
         raise DataValidationError(f"Missing required columns: {missing}")
