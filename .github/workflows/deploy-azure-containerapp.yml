@@ -18,7 +18,7 @@ jobs:
         uses: azure/container-apps-deploy-action@v1
         with:
           azureCredentials: ${{ secrets.AZURE_CREDENTIALS }}
-          resourceGroup: ${{ vars.AZURE_RESOURCE_GROUP }}
+          resourceGroup: bet-bot-group
           imageToDeploy: ${{ vars.ACR_LOGIN_SERVER }}/bet-bot:${{ github.sha }}
           containerAppName: ${{ vars.CONTAINER_APP_NAME }}
           acrName: ${{ vars.ACR_NAME }}
