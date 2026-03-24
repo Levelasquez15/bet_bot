@@ -9,21 +9,61 @@ on:
 jobs:
   deploy:
     runs-on: ubuntu-latest
+    env:
+      RESOURCE_GROUP: bet-bot-group
+      ACR_NAME: betbotlewis15
+      ACR_LOGIN_SERVER: betbotlewis15.azurecr.io
+      CONTAINER_ENV_NAME: bet-bot-env
+      CONTAINER_APP_NAME: bet-bot-app
+      IMAGE_NAME: bet-bot
+      IMAGE_TAG: ${{ github.sha }}
 
     steps:
       - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Build and deploy Container App
-        uses: azure/container-apps-deploy-action@v1
+      - name: Azure Login
+        uses: azure/login@v2
         with:
-          azureCredentials: ${{ secrets.AZURE_CREDENTIALS }}
-          resourceGroup: bet-bot-group
-          acrName: betbotlewis15
-          acrUsername: ${{ secrets.ACR_USERNAME }}
-          acrPassword: ${{ secrets.ACR_PASSWORD }}
-          containerAppName: bet-bot-app
-          imageToBuild: betbotlewis15.azurecr.io/bet-bot:${{ github.sha }}
-          imageToDeploy: betbotlewis15.azurecr.io/bet-bot:${{ github.sha }}
-          location: eastus
-          disableTelemetry: true
+          creds: ${{ secrets.AZURE_CREDENTIALS }}
+
+      - name: Build Image in ACR
+        uses: azure/cli@v2
+        with:
+          inlineScript: |
+            az acr build \
+              --registry "$ACR_NAME" \
+              --image "$IMAGE_NAME:$IMAGE_TAG" \
+              .
+
+      - name: Create or Update Container App
+        uses: azure/cli@v2
+        with:
+          inlineScript: |
+            IMAGE="$ACR_LOGIN_SERVER/$IMAGE_NAME:$IMAGE_TAG"
+
+            APP_EXISTS=$(az containerapp show \
+              --name "$CONTAINER_APP_NAME" \
+              --resource-group "$RESOURCE_GROUP" \
+              --query name -o tsv 2>/dev/null || true)
+
+            if [ -z "$APP_EXISTS" ]; then
+              az containerapp create \
+                --name "$CONTAINER_APP_NAME" \
+                --resource-group "$RESOURCE_GROUP" \
+                --environment "$CONTAINER_ENV_NAME" \
+                --image "$IMAGE" \
+                --registry-server "$ACR_LOGIN_SERVER" \
+                --registry-username "${{ secrets.ACR_USERNAME }}" \
+                --registry-password "${{ secrets.ACR_PASSWORD }}" \
+                --secrets api-football-key='${{ secrets.API_FOOTBALL_KEY }}' telegram-bot-token='${{ secrets.TELEGRAM_TOKEN }}' \
+                --env-vars API_FOOTBALL_KEY=secretref:api-football-key TELEGRAM_TOKEN=secretref:telegram-bot-token TELEGRAM_BOT_TOKEN=secretref:telegram-bot-token \
+                --min-replicas 1 \
+                --max-replicas 1
+            else
+              az containerapp update \
+                --name "$CONTAINER_APP_NAME" \
+                --resource-group "$RESOURCE_GROUP" \
+                --image "$IMAGE" \
+                --set-env-vars API_FOOTBALL_KEY=secretref:api-football-key TELEGRAM_TOKEN=secretref:telegram-bot-token TELEGRAM_BOT_TOKEN=secretref:telegram-bot-token
+            fi
