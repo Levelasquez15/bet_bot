@@ -19,8 +19,10 @@ jobs:
         with:
           azureCredentials: ${{ secrets.AZURE_CREDENTIALS }}
           resourceGroup: bet-bot-group
-          imageToDeploy: ${{ vars.ACR_LOGIN_SERVER }}/bet-bot:${{ github.sha }}
-          containerAppName: ${{ vars.CONTAINER_APP_NAME }}
-          acrName: ${{ vars.ACR_NAME }}
+          acrName: betbotlewis15
           acrUsername: ${{ secrets.ACR_USERNAME }}
           acrPassword: ${{ secrets.ACR_PASSWORD }}
+          containerAppName: bet-bot-app
+          imageToDeploy: betbotlewis15.azurecr.io/bet-bot:${{ github.sha }}
+          location: eastus
+          disableTelemetry: true
