@@ -23,6 +23,7 @@ jobs:
           acrUsername: ${{ secrets.ACR_USERNAME }}
           acrPassword: ${{ secrets.ACR_PASSWORD }}
           containerAppName: bet-bot-app
+          imageToBuild: betbotlewis15.azurecr.io/bet-bot:${{ github.sha }}
           imageToDeploy: betbotlewis15.azurecr.io/bet-bot:${{ github.sha }}
           location: eastus
           disableTelemetry: true
