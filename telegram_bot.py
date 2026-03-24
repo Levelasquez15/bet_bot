@@ -30,9 +30,9 @@ def _get_api_key() -> str:
 
 
 def _get_telegram_token() -> str:
-    token = os.getenv("TELEGRAM_BOT_TOKEN", "").strip()
+    token = os.getenv("TELEGRAM_TOKEN", "").strip() or os.getenv("TELEGRAM_BOT_TOKEN", "").strip()
     if not token:
-        raise RuntimeError("Missing TELEGRAM_BOT_TOKEN in .env or environment")
+        raise RuntimeError("Missing TELEGRAM_TOKEN/TELEGRAM_BOT_TOKEN in .env or environment")
     return token
 
 
@@ -75,13 +75,13 @@ async def cmd_start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
 async def cmd_status(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     league_id, season = _current_config(context)
     has_api = bool(os.getenv("API_FOOTBALL_KEY", ""))
-    has_token = bool(os.getenv("TELEGRAM_BOT_TOKEN", ""))
+    has_token = bool(os.getenv("TELEGRAM_TOKEN", "") or os.getenv("TELEGRAM_BOT_TOKEN", ""))
     await update.message.reply_text(
         f"Estado:\n"
         f"league_id={league_id}\n"
         f"season={season}\n"
         f"API_FOOTBALL_KEY={'OK' if has_api else 'MISSING'}\n"
-        f"TELEGRAM_BOT_TOKEN={'OK' if has_token else 'MISSING'}"
+        f"TELEGRAM_TOKEN={'OK' if has_token else 'MISSING'}"
     )
 
 

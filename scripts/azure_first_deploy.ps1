@@ -51,7 +51,7 @@ az containerapp create `
   --registry-username $acrUser `
   --registry-password $acrPass `
   --secrets api-football-key=$ApiFootballKey telegram-bot-token=$TelegramBotToken `
-  --env-vars API_FOOTBALL_KEY=secretref:api-football-key TELEGRAM_BOT_TOKEN=secretref:telegram-bot-token `
+  --env-vars API_FOOTBALL_KEY=secretref:api-football-key TELEGRAM_TOKEN=secretref:telegram-bot-token TELEGRAM_BOT_TOKEN=secretref:telegram-bot-token `
   --min-replicas 1 `
   --max-replicas 1 | Out-Null
 

@@ -43,4 +43,4 @@ jobs:
               --name "$CONTAINER_APP_NAME" \
               --resource-group "$RESOURCE_GROUP" \
               --image "$IMAGE" \
-              --set-env-vars API_FOOTBALL_KEY=secretref:api-football-key TELEGRAM_BOT_TOKEN=secretref:telegram-bot-token
+              --set-env-vars API_FOOTBALL_KEY=secretref:api-football-key TELEGRAM_TOKEN=secretref:telegram-bot-token TELEGRAM_BOT_TOKEN=secretref:telegram-bot-token
