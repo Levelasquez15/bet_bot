@@ -44,13 +44,13 @@ DEFAULT_LEAGUE_ID = 39  # Premier League
 DEFAULT_SEASON = 2023  # Usar temporada con datos disponibles
 MAX_FIXTURES_ANALYSIS = 12
 
-# Mensajes en español mejorados
+# Mensajes simplificados para evitar errores de parsing Markdown
 MESSAGES = {
-    'start': """🤖 *BetBot - Pronosticos Deportivos*
+    'start': """*BetBot - Pronosticos Deportivos*
 
-¡Hola! Soy tu asistente de pronosticos deportivos con IA.
+Hola! Soy tu asistente de pronosticos deportivos con IA.
 
-📊 *Comandos disponibles:*
+*Comandos disponibles:*
 /jornada - Analisis de partidos proximos (hoy y proximos dias)
 /jornada_manana - Analisis especifico de manana
 /jornada_pasado - Analisis especifico en 2 dias
@@ -62,97 +62,96 @@ MESSAGES = {
 /status - Estado del bot y configuracion
 /setleague `id` `temporada` - Cambiar liga y temporada
 
-💡 *Para activar notificaciones de oportunidades:* Usa /notificaciones
-⚙️ *Configuracion actual:* Liga={league}, Temporada={season}
-📱 *Notificaciones:* {notifications}""",
+*Para activar notificaciones de oportunidades:* Usa /notificaciones
+*Configuracion actual:* Liga={league}, Temporada={season}
+*Notificaciones:* {notifications}""",
 
-    'status': """📊 *Estado del Bot*
+    'status': """*Estado del Bot*
 
-🔧 Configuración:
-• Liga: {league_id}
-• Temporada: {season}
-• API Football: {api_status}
-• Token Telegram: {token_status}
-• Notificaciones: {notifications}
+Configuracion:
+- Liga: {league_id}
+- Temporada: {season}
+- API Football: {api_status}
+- Token Telegram: {token_status}
+- Notificaciones: {notifications}
 
-📈 Modelo listo para análisis""",
+Modelo listo para analisis""",
 
-    'jornada_header': """🏆 *ANÁLISIS DE JORNADA - {date}*
+    'jornada_header': """*ANALISIS DE JORNADA - {date}*
 
-📊 *{count} partidos programados*
-⚽ *Liga:* {league_name}
-⏰ *Actualizado:* {time}
+*{count} partidos programados*
+*Liga:* {league_name}
+*Actualizado:* {time}
 
-───────────────""",
+---------------""",
 
-    'match_analysis': """⚽ *{home} vs {away}*
-🕐 {time}
-🏟️ {venue}
+    'match_analysis': """*{home} vs {away}*
+{time}
 
-🎲 *Probabilidades del Modelo:*
-• 1️⃣ Local: {home_win:.1%}
-• ❌ Empate: {draw:.1%}
-• 2️⃣ Visitante: {away_win:.1%}
-• ➕ +2.5 Goles: {over:.1%}
+*Probabilidades del Modelo:*
+- Local: {home_win:.1%}
+- Empate: {draw:.1%}
+- Visitante: {away_win:.1%}
+- +2.5 Goles: {over:.1%}
 
-⚡ *Fuerza de Ataque:*
-• {home}: {lambda_home:.2f}
-• {away}: {lambda_away:.2f}
+*Fuerza de Ataque:*
+- {home}: {lambda_home:.2f}
+- {away}: {lambda_away:.2f}
 
-💡 *Recomendación:* {recommendation}
-───────────────""",
+*Recomendacion:* {recommendation}
+---------------""",
 
-    'top_picks': """🎯 *TOP PICKS RECOMENDADOS*
+    'top_picks': """*TOP PICKS RECOMENDADOS*
 
 {matches_text}
 
-💡 *Recomendaciones basadas en modelo Poisson+Elo*
-📈 *Valor esperado mínimo:* 3%""",
+*Recomendaciones basadas en modelo Poisson+Elo*
+*Valor esperado minimo:* 3%""",
 
-    'accumulator': """🎰 *COMBINADA SUGERIDA*
+    'accumulator': """*COMBINADA SUGERIDA*
 
-🔗 {legs} partidos combinados
-📊 Probabilidad total: {prob:.1%}
-💰 Cuota total: {odds:.2f}
-🎯 Valor esperado: {ev:.1%}
+{legs} partidos combinados
+Probabilidad total: {prob:.1%}
+Cuota total: {odds:.2f}
+Valor esperado: {ev:.1%}
 
-⚠️ *Recuerda:* Juego responsable""",
+*Recuerda:* Juego responsable""",
 
-    'notification_alert': """🚨 *ALERTA DE OPORTUNIDAD!*
+    'notification_alert': """*ALERTA DE OPORTUNIDAD!*
 
-⚽ *{home} vs {away}*
-🕐 {date}
+*{home} vs {away}*
+{date}
 
-🎯 *Pick recomendado:* {selection} ({market})
-📊 Probabilidad: {prob:.1%}
-💰 Cuota: {odds:.2f}
-🎯 EV: {ev:.1%}
+*Pick recomendado:* {selection} ({market})
+Probabilidad: {prob:.1%}
+Cuota: {odds:.2f}
+EV: {ev:.1%}
 
-💡 *Confianza:* {confidence}
+*Confianza:* {confidence}
 
-⚠️ *Actua rapido - las cuotas cambian*""",
+*Actua rapido - las cuotas cambian*""",
 
-    'no_matches': "📅 No hay partidos programados para {date} en la liga configurada.",
+    'no_matches': "No hay partidos programados para {date} en la liga configurada.",
 
-    'analyzing': "🔍 Analizando {count} partidos de {date}...",
+    'analyzing': "Analizando {count} partidos de {date}...",
 
-    'error_data': "❌ Error obteniendo datos. Verifica la configuración.",
-    'error_analysis': "❌ Error en el análisis. Inténtalo de nuevo.",
-    'processing': "⏳ Procesando...",
+    'error_data': "Error obteniendo datos. Verifica la configuracion.",
+    'error_analysis': "Error en el analisis. Intentelo de nuevo.",
+    'processing': "Procesando...",
 
-    'notifications_enabled': "✅ *Notificaciones activadas*\n\nRecibirás alertas automáticas cuando el bot encuentre oportunidades de valor (EV >3% y prob >50%) durante los análisis de jornada.",
-    'notifications_disabled': "❌ *Notificaciones desactivadas*",
+    'notifications_enabled': "*Notificaciones activadas*\n\nRecibiras alertas automaticas cuando el bot encuentre oportunidades de valor (EV >3% y prob >50%) durante los analisis de jornada.",
+    'notifications_disabled': "*Notificaciones desactivadas*",
 
-    'upcoming_matches_notification': """📅 *PARTIDOS PROXIMOS - {date}*
+    'upcoming_matches_notification': """*PARTIDOS PROXIMOS - {date}*
 
-⚽ *{count} partidos programados*
+*{count} partidos programados*
 
 {matches_list}
 
-💡 *Usa /jornada para analisis completo*
-📊 *Usa /notificaciones para activar alertas de oportunidades*""",
+*Usa /jornada para analisis completo*
+*Usa /notificaciones para activar alertas de oportunidades*""",
 
-    'invalid_format': "❌ Formato inválido. Usa: {usage}",
+    'invalid_format': "Formato invalido. Usa: {usage}",
 }
 
 
