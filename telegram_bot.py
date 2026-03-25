@@ -44,29 +44,29 @@ DEFAULT_LEAGUE_ID = 39  # Premier League
 DEFAULT_SEASON = 2023  # Usar temporada con datos disponibles
 MAX_FIXTURES_ANALYSIS = 12
 
-# Mensajes en formato Markdown (viejo, más permisivo)
+# Mensajes en formato HTML (más robusto que Markdown)
 MESSAGES = {
-    'start': """*BetBot - Pronosticos Deportivos*
+    'start': """<b>BetBot - Pronosticos Deportivos</b>
 
 Hola! Soy tu asistente de pronosticos deportivos con IA.
 
-*Comandos disponibles:*
+<b>Comandos disponibles:</b>
 /jornada - Analisis de partidos proximos (hoy y proximos dias)
 /jornada_manana - Analisis especifico de manana
 /jornada_pasado - Analisis especifico en 2 dias
 /proximos - Ver lista completa de proximos partidos
-/partido `Local` vs `Visitante` - Analisis especifico
+/partido <code>Local</code> vs <code>Visitante</code> - Analisis especifico
 /combinada - Generar combinada automatica
-/comparar_lineas `Local` vs `Visitante` - Comparar cuotas
+/comparar_lineas <code>Local</code> vs <code>Visitante</code> - Comparar cuotas
 /notificaciones - Activar/desactivar alertas de oportunidades
 /status - Estado del bot y configuracion
-/setleague `id` `temporada` - Cambiar liga y temporada
+/setleague <code>id</code> <code>temporada</code> - Cambiar liga y temporada
 
-*Para activar notificaciones de oportunidades:* Usa /notificaciones
-*Configuracion actual:* Liga={league}, Temporada={season}
-*Notificaciones:* {notifications}""",
+<b>Para activar notificaciones de oportunidades:</b> Usa /notificaciones
+<b>Configuracion actual:</b> Liga={league}, Temporada={season}
+<b>Notificaciones:</b> {notifications}""",
 
-    'status': """*Estado del Bot*
+    'status': """<b>Estado del Bot</b>
 
 Configuracion:
 - Liga: {league_id}
@@ -77,59 +77,59 @@ Configuracion:
 
 Modelo listo para analisis""",
 
-    'jornada_header': """*ANALISIS DE JORNADA - {date}*
+    'jornada_header': """<b>ANALISIS DE JORNADA - {date}</b>
 
-*{count} partidos programados*
-*Liga:* {league_name}
-*Actualizado:* {time}
+<b>{count} partidos programados</b>
+<b>Liga:</b> {league_name}
+<b>Actualizado:</b> {time}
 
 ---------------""",
 
-    'match_analysis': """*{home} vs {away}*
+    'match_analysis': """<b>{home} vs {away}</b>
 {time}
 
-*Probabilidades del Modelo:*
+<b>Probabilidades del Modelo:</b>
 - Local: {home_win:.1%}
 - Empate: {draw:.1%}
 - Visitante: {away_win:.1%}
 - +2.5 Goles: {over:.1%}
 
-*Fuerza de Ataque:*
+<b>Fuerza de Ataque:</b>
 - {home}: {lambda_home:.2f}
 - {away}: {lambda_away:.2f}
 
-*Recomendacion:* {recommendation}
+<b>Recomendacion:</b> {recommendation}
 ---------------""",
 
-    'top_picks': """*TOP PICKS RECOMENDADOS*
+    'top_picks': """<b>TOP PICKS RECOMENDADOS</b>
 
 {matches_text}
 
-*Recomendaciones basadas en modelo Poisson+Elo*
-*Valor esperado minimo:* 3%""",
+<b>Recomendaciones basadas en modelo Poisson+Elo</b>
+<b>Valor esperado minimo:</b> 3%""",
 
-    'accumulator': """*COMBINADA SUGERIDA*
+    'accumulator': """<b>COMBINADA SUGERIDA</b>
 
 {legs} partidos combinados
 Probabilidad total: {prob:.1%}
 Cuota total: {odds:.2f}
 Valor esperado: {ev:.1%}
 
-*Recuerda:* Juego responsable""",
+<b>Recuerda:</b> Juego responsable""",
 
-    'notification_alert': """*ALERTA DE OPORTUNIDAD!*
+    'notification_alert': """<b>ALERTA DE OPORTUNIDAD!</b>
 
-*{home} vs {away}*
+<b>{home} vs {away}</b>
 {date}
 
-*Pick recomendado:* {selection} ({market})
+<b>Pick recomendado:</b> {selection} ({market})
 Probabilidad: {prob:.1%}
 Cuota: {odds:.2f}
 EV: {ev:.1%}
 
-*Confianza:* {confidence}
+<b>Confianza:</b> {confidence}
 
-*Actua rapido - las cuotas cambian*""",
+<b>Actua rapido - las cuotas cambian</b>""",
 
     'no_matches': "No hay partidos programados para {date} en la liga configurada.",
 
@@ -256,7 +256,7 @@ async def cmd_start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
             notifications=notifications_status
         )
         logger.info(f"Sending start message: {message[:100]}...")
-        await update.message.reply_text(message, parse_mode='Markdown')
+        await update.message.reply_text(message, parse_mode='HTML')
         logger.info("Start message sent successfully")
     except Exception as e:
         logger.error(f"Error in cmd_start: {e}")
@@ -276,30 +276,30 @@ async def cmd_status(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None
         token_status="✅ OK" if has_token else "❌ FALTA",
         notifications=notifications_status
     )
-    await update.message.reply_text(message, parse_mode='Markdown')
+    await update.message.reply_text(message, parse_mode='HTML')
 
 
 async def cmd_setleague(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     if len(context.args) < 2:
-        await update.message.reply_text("Uso: /setleague <league_id> <season>", parse_mode='Markdown')
+        await update.message.reply_text("Uso: /setleague <league_id> <season>", parse_mode='HTML')
         return
 
     try:
         league_id = int(context.args[0])
         season = int(context.args[1])
     except ValueError:
-        await update.message.reply_text("league_id y season deben ser números", parse_mode='Markdown')
+        await update.message.reply_text("league_id y season deben ser números", parse_mode='HTML')
         return
 
     context.bot_data["league_id"] = league_id
     context.bot_data["season"] = season
-    await update.message.reply_text(f"✅ Configurado: Liga={league_id}, Temporada={season}", parse_mode='Markdown')
+    await update.message.reply_text(f"✅ Configurado: Liga={league_id}, Temporada={season}", parse_mode='HTML')
 
 
 async def cmd_predict(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     raw = " ".join(context.args).strip()
     if "|" not in raw and "vs" not in raw.lower():
-        await update.message.reply_text("Uso: /partido `<Local>` vs `<Visitante>`\nEjemplo: /partido Real Madrid vs Barcelona", parse_mode='Markdown')
+        await update.message.reply_text("Uso: /partido `<Local>` vs `<Visitante>`\nEjemplo: /partido Real Madrid vs Barcelona", parse_mode='HTML')
         return
 
     # Parse different formats: "Local | Visitante" or "Local vs Visitante"
@@ -308,12 +308,12 @@ async def cmd_predict(update: Update, context: ContextTypes.DEFAULT_TYPE) -> Non
     else:
         parts = raw.lower().split("vs")
         if len(parts) != 2:
-            await update.message.reply_text("Formato inválido. Usa: /partido Real Madrid vs Barcelona", parse_mode='Markdown')
+            await update.message.reply_text("Formato inválido. Usa: /partido Real Madrid vs Barcelona", parse_mode='HTML')
             return
         home_team, away_team = [p.strip() for p in parts]
 
     if not home_team or not away_team:
-        await update.message.reply_text("Equipos inválidos. Ejemplo: /partido Real Madrid vs Barcelona", parse_mode='Markdown')
+        await update.message.reply_text("Equipos inválidos. Ejemplo: /partido Real Madrid vs Barcelona", parse_mode='HTML')
         return
 
     await update.message.reply_text(MESSAGES['processing'])
@@ -345,7 +345,7 @@ async def cmd_predict(update: Update, context: ContextTypes.DEFAULT_TYPE) -> Non
             recommendation=recommendation
         )
 
-        await update.message.reply_text(message, parse_mode='Markdown')
+        await update.message.reply_text(message, parse_mode='HTML')
 
     except Exception as exc:
         await update.message.reply_text(f"❌ Error: {str(exc)}")
@@ -397,7 +397,7 @@ async def _analyze_jornada_by_date(update: Update, context: ContextTypes.DEFAULT
             league_name=f"Liga {league_id}",
             time=datetime.now().strftime("%H:%M")
         )
-        await update.message.reply_text(header, parse_mode='Markdown')
+        await update.message.reply_text(header, parse_mode='HTML')
 
         # Send individual match analyses
         for _, fx in target_fixtures.iterrows():
@@ -422,7 +422,7 @@ async def _analyze_jornada_by_date(update: Update, context: ContextTypes.DEFAULT
                     lambda_away=probs['lambda_away'],
                     recommendation=recommendation
                 )
-                await update.message.reply_text(match_msg, parse_mode='Markdown')
+                await update.message.reply_text(match_msg, parse_mode='HTML')
 
             except Exception as e:
                 logger.error(f"Error analyzing match {home} vs {away}: {e}")
@@ -438,7 +438,7 @@ async def _analyze_jornada_by_date(update: Update, context: ContextTypes.DEFAULT
                 )
 
             message = MESSAGES['top_picks'].format(matches_text="\n".join(picks_text))
-            await update.message.reply_text(message, parse_mode='Markdown')
+            await update.message.reply_text(message, parse_mode='HTML')
 
             # Send accumulator if available
             if result['acc']:
@@ -448,7 +448,7 @@ async def _analyze_jornada_by_date(update: Update, context: ContextTypes.DEFAULT
                     odds=result['acc']['combined_odds'],
                     ev=result['acc']['combined_expected_value']
                 )
-                await update.message.reply_text(acc_msg, parse_mode='Markdown')
+                await update.message.reply_text(acc_msg, parse_mode='HTML')
 
             # Check for notification-worthy picks
             await _check_and_send_notifications(update, context, result['picks'])
@@ -498,14 +498,14 @@ async def cmd_jornada_manana(update: Update, context: ContextTypes.DEFAULT_TYPE)
         result = await asyncio.to_thread(_analyze_jornada_inline, matches, tomorrow_fixtures)
 
         # Send jornada header
-        header = f"""🏆 *ANÁLISIS DE MAÑANA - {tomorrow.strftime('%d/%m/%Y')}*
+        header = f"""🏆 <b>ANÁLISIS DE MAÑANA - {tomorrow.strftime('%d/%m/%Y')}</b>
 
-📊 *{count} partidos programados*
-⚽ *Liga:* {league_id}
-⏰ *Actualizado:* {datetime.now().strftime("%H:%M")}
+📊 <b>{count} partidos programados</b>
+⚽ <b>Liga:</b> {league_id}
+⏰ <b>Actualizado:</b> {datetime.now().strftime("%H:%M")}
 
 ───────────────"""
-        await update.message.reply_text(header, parse_mode='Markdown')
+        await update.message.reply_text(header, parse_mode='HTML')
 
         # Send individual match analyses
         for i, (_, fx) in enumerate(tomorrow_fixtures.iterrows()):
@@ -529,7 +529,7 @@ async def cmd_jornada_manana(update: Update, context: ContextTypes.DEFAULT_TYPE)
 
 💡 *Recomendación:* {recommendation}
 ───────────────"""
-                await update.message.reply_text(match_msg, parse_mode='Markdown')
+                await update.message.reply_text(match_msg, parse_mode='HTML')
 
             except Exception as e:
                 logger.error(f"Error analyzing match {home} vs {away}: {e}")
@@ -575,14 +575,14 @@ async def cmd_jornada_pasado(update: Update, context: ContextTypes.DEFAULT_TYPE)
         result = await asyncio.to_thread(_analyze_jornada_inline, matches, target_fixtures)
 
         # Send jornada header
-        header = f"""🏆 *ANÁLISIS EN 2 DÍAS - {target_date.strftime('%d/%m/%Y')}*
+        header = f"""🏆 <b>ANÁLISIS EN 2 DÍAS - {target_date.strftime('%d/%m/%Y')}</b>
 
-📊 *{count} partidos programados*
-⚽ *Liga:* {league_id}
-⏰ *Actualizado:* {datetime.now().strftime("%H:%M")}
+📊 <b>{count} partidos programados</b>
+⚽ <b>Liga:</b> {league_id}
+⏰ <b>Actualizado:</b> {datetime.now().strftime("%H:%M")}
 
 ───────────────"""
-        await update.message.reply_text(header, parse_mode='Markdown')
+        await update.message.reply_text(header, parse_mode='HTML')
 
         # Send individual match analyses
         for i, (_, fx) in enumerate(target_fixtures.iterrows()):
@@ -606,7 +606,7 @@ async def cmd_jornada_pasado(update: Update, context: ContextTypes.DEFAULT_TYPE)
 
 💡 *Recomendación:* {recommendation}
 ───────────────"""
-                await update.message.reply_text(match_msg, parse_mode='Markdown')
+                await update.message.reply_text(match_msg, parse_mode='HTML')
 
             except Exception as e:
                 logger.error(f"Error analyzing match {home} vs {away}: {e}")
@@ -650,7 +650,7 @@ async def cmd_proximos(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
             lines.append("")
 
         message = "\n".join(lines)
-        await update.message.reply_text(message, parse_mode='Markdown')
+        await update.message.reply_text(message, parse_mode='HTML')
 
     except Exception as exc:
         await update.message.reply_text(f"❌ Error obteniendo próximos partidos: {str(exc)}")
@@ -683,14 +683,14 @@ async def _analyze_upcoming_matches(update: Update, context: ContextTypes.DEFAUL
         result = await asyncio.to_thread(_analyze_jornada_inline, matches, fixtures_df)
 
         # Send jornada header
-        header = f"""🏆 *ANÁLISIS DE PRÓXIMOS PARTIDOS*
+        header = f"""🏆 <b>ANÁLISIS DE PRÓXIMOS PARTIDOS</b>
 
-📊 *{count} partidos programados*
-⚽ *Liga:* {league_id}
-⏰ *Actualizado:* {datetime.now().strftime("%H:%M")}
+📊 <b>{count} partidos programados</b>
+⚽ <b>Liga:</b> {league_id}
+⏰ <b>Actualizado:</b> {datetime.now().strftime("%H:%M")}
 
 ───────────────"""
-        await update.message.reply_text(header, parse_mode='Markdown')
+        await update.message.reply_text(header, parse_mode='HTML')
 
         # Send individual match analyses (limit to first 8 for readability)
         for i, (_, fx) in enumerate(fixtures_df.head(8).iterrows()):
@@ -714,7 +714,7 @@ async def _analyze_upcoming_matches(update: Update, context: ContextTypes.DEFAUL
 
 💡 *Recomendación:* {recommendation}
 ───────────────"""
-                await update.message.reply_text(match_msg, parse_mode='Markdown')
+                await update.message.reply_text(match_msg, parse_mode='HTML')
 
             except Exception as e:
                 logger.error(f"Error analyzing match {home} vs {away}: {e}")
@@ -730,7 +730,7 @@ async def _analyze_upcoming_matches(update: Update, context: ContextTypes.DEFAUL
                 )
 
             message = MESSAGES['top_picks'].format(matches_text="\n".join(picks_text))
-            await update.message.reply_text(message, parse_mode='Markdown')
+            await update.message.reply_text(message, parse_mode='HTML')
 
             # Send accumulator if available
             if result['acc']:
@@ -740,7 +740,7 @@ async def _analyze_upcoming_matches(update: Update, context: ContextTypes.DEFAUL
                     odds=result['acc']['combined_odds'],
                     ev=result['acc']['combined_expected_value']
                 )
-                await update.message.reply_text(acc_msg, parse_mode='Markdown')
+                await update.message.reply_text(acc_msg, parse_mode='HTML')
 
             # Check for notification-worthy picks
             await _check_and_send_notifications(update, context, result['picks'])
@@ -781,7 +781,7 @@ async def _check_and_send_notifications(update: Update, context: ContextTypes.DE
     )
 
     try:
-        await update.message.reply_text(alert_msg, parse_mode='Markdown')
+        await update.message.reply_text(alert_msg, parse_mode='HTML')
     except Exception as e:
         logger.error(f"Error sending notification: {e}")
 
@@ -789,16 +789,16 @@ async def _check_and_send_notifications(update: Update, context: ContextTypes.DE
 async def cmd_combinada(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     """Generate accumulator with specified number of legs."""
     if not context.args:
-        await update.message.reply_text(MESSAGES['accumulator_options'], parse_mode='Markdown')
+        await update.message.reply_text(MESSAGES['accumulator_options'], parse_mode='HTML')
         return
 
     try:
         legs = int(context.args[0])
         if legs not in [3, 5, 10]:
-            await update.message.reply_text("Número de cuotas debe ser 3, 5 o 10", parse_mode='Markdown')
+            await update.message.reply_text("Número de cuotas debe ser 3, 5 o 10", parse_mode='HTML')
             return
     except ValueError:
-        await update.message.reply_text("Uso: /combinada <número>\nEjemplo: /combinada 3", parse_mode='Markdown')
+        await update.message.reply_text("Uso: /combinada <número>\nEjemplo: /combinada 3", parse_mode='HTML')
         return
 
     await update.message.reply_text(f"🎰 Generando combinada de {legs} cuotas...")
@@ -843,7 +843,7 @@ async def cmd_combinada(update: Update, context: ContextTypes.DEFAULT_TYPE) -> N
         details.append(f"• Cuota total: {acc['combined_odds']:.2f}")
         details.append(f"• Valor esperado: {acc['combined_expected_value']:.1%}")
 
-        await update.message.reply_text("\n".join(details), parse_mode='Markdown')
+        await update.message.reply_text("\n".join(details), parse_mode='HTML')
 
     except Exception as exc:
         await update.message.reply_text(f"❌ Error generando combinada: {str(exc)}")
@@ -865,7 +865,7 @@ async def cmd_notificaciones(update: Update, context: ContextTypes.DEFAULT_TYPE)
     else:
         message = MESSAGES['notifications_disabled']
 
-    await update.message.reply_text(message, parse_mode='Markdown')
+    await update.message.reply_text(message, parse_mode='HTML')
 
 
 async def _send_upcoming_matches_notification(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -933,7 +933,7 @@ async def _send_upcoming_matches_notification(update: Update, context: ContextTy
                 count=total_matches,
                 matches_list="\n".join(lines)
             )
-            await update.message.reply_text(notification_msg, parse_mode='Markdown')
+            await update.message.reply_text(notification_msg, parse_mode='HTML')
 
     except Exception as e:
         logger.error(f"Error sending upcoming matches notification: {e}")
@@ -943,7 +943,7 @@ async def cmd_comparar_lineas(update: Update, context: ContextTypes.DEFAULT_TYPE
     """Compare betting lines for a specific match."""
     raw = " ".join(context.args).strip()
     if not raw or ("|" not in raw and "vs" not in raw.lower()):
-        await update.message.reply_text("Uso: /comparar_lineas `<Local>` vs `<Visitante>`\nEjemplo: /comparar_lineas Real Madrid vs Barcelona", parse_mode='Markdown')
+        await update.message.reply_text("Uso: /comparar_lineas `<Local>` vs `<Visitante>`\nEjemplo: /comparar_lineas Real Madrid vs Barcelona", parse_mode='HTML')
         return
 
     # Parse different formats: "Local | Visitante" or "Local vs Visitante"
@@ -952,12 +952,12 @@ async def cmd_comparar_lineas(update: Update, context: ContextTypes.DEFAULT_TYPE
     else:
         parts = raw.lower().split("vs")
         if len(parts) != 2:
-            await update.message.reply_text("Formato inválido. Usa: /comparar_lineas Real Madrid vs Barcelona", parse_mode='Markdown')
+            await update.message.reply_text("Formato inválido. Usa: /comparar_lineas Real Madrid vs Barcelona", parse_mode='HTML')
             return
         home_team, away_team = [p.strip() for p in parts]
 
     if not home_team or not away_team:
-        await update.message.reply_text("Equipos inválidos. Ejemplo: /comparar_lineas Real Madrid vs Barcelona", parse_mode='Markdown')
+        await update.message.reply_text("Equipos inválidos. Ejemplo: /comparar_lineas Real Madrid vs Barcelona", parse_mode='HTML')
         return
 
     await update.message.reply_text("🔍 Comparando líneas de apuestas...")
@@ -1026,7 +1026,7 @@ async def cmd_comparar_lineas(update: Update, context: ContextTypes.DEFAULT_TYPE
                 lines.append("")
 
         message = "\n".join(lines)
-        await update.message.reply_text(message, parse_mode='Markdown')
+        await update.message.reply_text(message, parse_mode='HTML')
 
     except Exception as exc:
         await update.message.reply_text(f"❌ Error comparando líneas: {str(exc)}")
@@ -1120,7 +1120,7 @@ async def cmd_analyze_next(update: Update, context: ContextTypes.DEFAULT_TYPE) -
     try:
         n = int(context.args[0]) if context.args else 6
     except ValueError:
-        await update.message.reply_text("Uso: /analyze_next [n]", parse_mode='Markdown')
+        await update.message.reply_text("Uso: /analyze_next [n]", parse_mode='HTML')
         return
 
     n = max(2, min(n, MAX_FIXTURES_ANALYSIS))
@@ -1159,7 +1159,7 @@ async def cmd_analyze_next(update: Update, context: ContextTypes.DEFAULT_TYPE) -
             lines.append(f"• Cuota: {acc['combined_odds']:.2f}")
             lines.append(f"• EV: {acc['combined_expected_value']:.2%}")
 
-        await update.message.reply_text("\n".join(lines), parse_mode='Markdown')
+        await update.message.reply_text("\n".join(lines), parse_mode='HTML')
 
     except Exception as exc:
         await update.message.reply_text(f"❌ Error analizando próximos partidos: {str(exc)}")
@@ -1169,7 +1169,7 @@ async def cmd_backtest(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
     try:
         min_history = int(context.args[0]) if context.args else 120
     except ValueError:
-        await update.message.reply_text("Uso: /backtest [min_history]", parse_mode='Markdown')
+        await update.message.reply_text("Uso: /backtest [min_history]", parse_mode='HTML')
         return
 
     min_history = max(20, min_history)
@@ -1196,7 +1196,7 @@ async def cmd_backtest(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
             "• LogLoss <1.0 es bueno, <0.8 es excelente\n"
             "• Brier <0.25 es aceptable"
         )
-        await update.message.reply_text(text, parse_mode='Markdown')
+        await update.message.reply_text(text, parse_mode='HTML')
 
     except Exception as exc:
         await update.message.reply_text(f"❌ Error en validación: {str(exc)}")
