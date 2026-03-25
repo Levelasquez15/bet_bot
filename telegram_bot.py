@@ -44,7 +44,7 @@ DEFAULT_LEAGUE_ID = 39  # Premier League
 DEFAULT_SEASON = 2023  # Usar temporada con datos disponibles
 MAX_FIXTURES_ANALYSIS = 12
 
-# Mensajes simplificados para evitar errores de parsing Markdown
+# Mensajes completamente ASCII para evitar errores de parsing Markdown
 MESSAGES = {
     'start': """*BetBot - Pronosticos Deportivos*
 
