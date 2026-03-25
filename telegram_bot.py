@@ -41,7 +41,7 @@ def _import_modules():
 load_dotenv()
 
 DEFAULT_LEAGUE_ID = 39  # Premier League
-DEFAULT_SEASON = datetime.now(timezone.utc).year
+DEFAULT_SEASON = 2023  # Usar temporada con datos disponibles
 MAX_FIXTURES_ANALYSIS = 12
 
 # Mensajes en español mejorados
@@ -51,15 +51,18 @@ MESSAGES = {
 ¡Hola! Soy tu asistente de pronósticos deportivos con IA.
 
 📊 *Comandos disponibles:*
-/jornada - Análisis completo de la jornada actual
-/jornada_manana - Análisis de partidos para mañana
-/jornada_pasado - Análisis de partidos en 2 días
+/jornada - Análisis de partidos próximos (hoy y próximos días)
+/jornada_manana - Análisis específico de mañana
+/jornada_pasado - Análisis específico en 2 días
+/proximos - Ver lista completa de próximos partidos
 /partido `<Local>` vs `<Visitante>` - Análisis específico
-/combinada `<n>` - Generar combinada (3, 5 o 10 cuotas)
-/notificaciones - Activar/desactivar alertas automáticas
+/combinada - Generar combinada automática
+/comparar_lineas `<Local>` vs `<Visitante>` - Comparar cuotas
+/notificaciones - Activar/desactivar alertas de oportunidades
 /status - Estado del bot y configuración
 /setleague `<id>` `<temporada>` - Cambiar liga y temporada
 
+💡 *Para activar notificaciones de oportunidades:* Usa /notificaciones
 ⚙️ *Configuración actual:* Liga={league}, Temporada={season}
 📱 *Notificaciones:* {notifications}""",
 
@@ -137,8 +140,17 @@ MESSAGES = {
     'error_analysis': "❌ Error en el análisis. Inténtalo de nuevo.",
     'processing': "⏳ Procesando...",
 
-    'notifications_enabled': "✅ *Notificaciones activadas*\n\nRecibirás alertas cuando haya oportunidades con EV >5% y prob >60%",
+    'notifications_enabled': "✅ *Notificaciones activadas*\n\nRecibirás alertas automáticas cuando el bot encuentre oportunidades de valor (EV >3% y prob >50%) durante los análisis de jornada.",
     'notifications_disabled': "❌ *Notificaciones desactivadas*",
+
+    'upcoming_matches_notification': """📅 *PARTIDOS PRÓXIMOS - {date}*
+
+⚽ *{count} partidos programados*
+
+{matches_list}
+
+💡 *Usa /jornada para análisis completo*
+📊 *Usa /notificaciones para activar alertas de oportunidades*""",
 
     'invalid_format': "❌ Formato inválido. Usa: {usage}",
 }
@@ -440,18 +452,295 @@ async def _analyze_jornada_by_date(update: Update, context: ContextTypes.DEFAULT
 
 
 async def cmd_jornada(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    """Analyze today's matches."""
-    await _analyze_jornada_by_date(update, context, days_ahead=0)
+    """Analyze upcoming matches (next 12 matches)."""
+    await _analyze_upcoming_matches(update, context, max_matches=12)
 
 
 async def cmd_jornada_manana(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     """Analyze tomorrow's matches."""
-    await _analyze_jornada_by_date(update, context, days_ahead=1)
+    await update.message.reply_text("🔍 Buscando partidos de mañana...")
+
+    try:
+        league_id, season = _current_config(context)
+        matches = await _load_history(context)
+
+        if matches.empty:
+            await update.message.reply_text(MESSAGES['error_data'])
+            return
+
+        # Get tomorrow's fixtures
+        tomorrow = date.today() + timedelta(days=1)
+        source = ApiFootballDataSource(api_key=_get_api_key())
+        fixtures_df = await asyncio.to_thread(source.get_upcoming_fixtures, league_id, season, 50)
+
+        if fixtures_df.empty:
+            await update.message.reply_text(f"📅 No hay partidos programados para mañana ({tomorrow.strftime('%d/%m/%Y')}).")
+            return
+
+        # Filter for tomorrow
+        fixtures_df['date_only'] = fixtures_df['date'].dt.date
+        tomorrow_fixtures = fixtures_df[fixtures_df['date_only'] == tomorrow]
+
+        if tomorrow_fixtures.empty:
+            await update.message.reply_text(f"📅 No hay partidos programados para mañana ({tomorrow.strftime('%d/%m/%Y')}).")
+            return
+
+        count = len(tomorrow_fixtures)
+        await update.message.reply_text(f"🔍 Analizando {count} partidos de mañana...")
+
+        # Analyze matches
+        result = await asyncio.to_thread(_analyze_jornada_inline, matches, tomorrow_fixtures)
+
+        # Send jornada header
+        header = f"""🏆 *ANÁLISIS DE MAÑANA - {tomorrow.strftime('%d/%m/%Y')}*
+
+📊 *{count} partidos programados*
+⚽ *Liga:* {league_id}
+⏰ *Actualizado:* {datetime.now().strftime("%H:%M")}
+
+───────────────"""
+        await update.message.reply_text(header, parse_mode='Markdown')
+
+        # Send individual match analyses
+        for i, (_, fx) in enumerate(tomorrow_fixtures.iterrows()):
+            fixture_id = int(fx["fixture_id"])
+            home = str(fx["home_team"])
+            away = str(fx["away_team"])
+            match_time = fx['date'].strftime("%H:%M") if pd.notna(fx['date']) else "TBD"
+
+            try:
+                probs = await asyncio.to_thread(_predict_match_inline, home, away, matches)
+                recommendation = _get_recommendation(probs)
+
+                match_msg = f"""⚽ *{home} vs {away}*
+🕐 {match_time}
+
+🎲 *Probabilidades del Modelo:*
+• 1️⃣ Local: {probs['home_win']:.1%}
+• ❌ Empate: {probs['draw']:.1%}
+• 2️⃣ Visitante: {probs['away_win']:.1%}
+• ➕ +2.5 Goles: {probs['over_2_5']:.1%}
+
+💡 *Recomendación:* {recommendation}
+───────────────"""
+                await update.message.reply_text(match_msg, parse_mode='Markdown')
+
+            except Exception as e:
+                logger.error(f"Error analyzing match {home} vs {away}: {e}")
+                continue
+
+    except Exception as exc:
+        await update.message.reply_text(f"❌ Error analizando jornada de mañana: {str(exc)}")
 
 
 async def cmd_jornada_pasado(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     """Analyze matches in 2 days."""
-    await _analyze_jornada_by_date(update, context, days_ahead=2)
+    await update.message.reply_text("🔍 Buscando partidos en 2 días...")
+
+    try:
+        league_id, season = _current_config(context)
+        matches = await _load_history(context)
+
+        if matches.empty:
+            await update.message.reply_text(MESSAGES['error_data'])
+            return
+
+        # Get fixtures in 2 days
+        target_date = date.today() + timedelta(days=2)
+        source = ApiFootballDataSource(api_key=_get_api_key())
+        fixtures_df = await asyncio.to_thread(source.get_upcoming_fixtures, league_id, season, 50)
+
+        if fixtures_df.empty:
+            await update.message.reply_text(f"📅 No hay partidos programados para {target_date.strftime('%d/%m/%Y')}.")
+            return
+
+        # Filter for target date
+        fixtures_df['date_only'] = fixtures_df['date'].dt.date
+        target_fixtures = fixtures_df[fixtures_df['date_only'] == target_date]
+
+        if target_fixtures.empty:
+            await update.message.reply_text(f"📅 No hay partidos programados para {target_date.strftime('%d/%m/%Y')}.")
+            return
+
+        count = len(target_fixtures)
+        await update.message.reply_text(f"🔍 Analizando {count} partidos en 2 días...")
+
+        # Analyze matches
+        result = await asyncio.to_thread(_analyze_jornada_inline, matches, target_fixtures)
+
+        # Send jornada header
+        header = f"""🏆 *ANÁLISIS EN 2 DÍAS - {target_date.strftime('%d/%m/%Y')}*
+
+📊 *{count} partidos programados*
+⚽ *Liga:* {league_id}
+⏰ *Actualizado:* {datetime.now().strftime("%H:%M")}
+
+───────────────"""
+        await update.message.reply_text(header, parse_mode='Markdown')
+
+        # Send individual match analyses
+        for i, (_, fx) in enumerate(target_fixtures.iterrows()):
+            fixture_id = int(fx["fixture_id"])
+            home = str(fx["home_team"])
+            away = str(fx["away_team"])
+            match_time = fx['date'].strftime("%H:%M") if pd.notna(fx['date']) else "TBD"
+
+            try:
+                probs = await asyncio.to_thread(_predict_match_inline, home, away, matches)
+                recommendation = _get_recommendation(probs)
+
+                match_msg = f"""⚽ *{home} vs {away}*
+🕐 {match_time}
+
+🎲 *Probabilidades del Modelo:*
+• 1️⃣ Local: {probs['home_win']:.1%}
+• ❌ Empate: {probs['draw']:.1%}
+• 2️⃣ Visitante: {probs['away_win']:.1%}
+• ➕ +2.5 Goles: {probs['over_2_5']:.1%}
+
+💡 *Recomendación:* {recommendation}
+───────────────"""
+                await update.message.reply_text(match_msg, parse_mode='Markdown')
+
+            except Exception as e:
+                logger.error(f"Error analyzing match {home} vs {away}: {e}")
+                continue
+
+    except Exception as exc:
+        await update.message.reply_text(f"❌ Error analizando jornada en 2 días: {str(exc)}")
+
+
+async def cmd_proximos(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Show list of upcoming matches."""
+    await update.message.reply_text(MESSAGES['processing'])
+
+    try:
+        league_id, season = _current_config(context)
+
+        # Get upcoming fixtures
+        source = ApiFootballDataSource(api_key=_get_api_key())
+        fixtures_df = await asyncio.to_thread(source.get_upcoming_fixtures, league_id, season, 20)
+
+        if fixtures_df.empty:
+            await update.message.reply_text("📅 No hay partidos próximos programados.")
+            return
+
+        # Group by date
+        fixtures_df['date_only'] = fixtures_df['date'].dt.date
+        grouped = fixtures_df.groupby('date_only')
+
+        lines = [f"📅 *Próximos partidos - Liga {league_id}*\n"]
+
+        for date_key, group in grouped:
+            date_str = date_key.strftime("%d/%m/%Y")
+            day_name = date_key.strftime("%A")
+
+            lines.append(f"🗓️ *{day_name} {date_str}*")
+            for _, match in group.iterrows():
+                home = str(match['home_team'])
+                away = str(match['away_team'])
+                time_str = match['date'].strftime("%H:%M") if pd.notna(match['date']) else "TBD"
+                lines.append(f"  ⚽ {time_str} - {home} vs {away}")
+            lines.append("")
+
+        message = "\n".join(lines)
+        await update.message.reply_text(message, parse_mode='Markdown')
+
+    except Exception as exc:
+        await update.message.reply_text(f"❌ Error obteniendo próximos partidos: {str(exc)}")
+
+
+async def _analyze_upcoming_matches(update: Update, context: ContextTypes.DEFAULT_TYPE, max_matches: int = 12):
+    """Analyze upcoming matches."""
+    await update.message.reply_text(MESSAGES['processing'])
+
+    try:
+        league_id, season = _current_config(context)
+        matches = await _load_history(context)
+
+        if matches.empty:
+            await update.message.reply_text(MESSAGES['error_data'])
+            return
+
+        # Get upcoming fixtures
+        source = ApiFootballDataSource(api_key=_get_api_key())
+        fixtures_df = await asyncio.to_thread(source.get_upcoming_fixtures, league_id, season, max_matches)
+
+        if fixtures_df.empty:
+            await update.message.reply_text("📅 No hay partidos próximos programados.")
+            return
+
+        count = len(fixtures_df)
+        await update.message.reply_text(f"🔍 Analizando {count} próximos partidos...")
+
+        # Analyze matches
+        result = await asyncio.to_thread(_analyze_jornada_inline, matches, fixtures_df)
+
+        # Send jornada header
+        header = f"""🏆 *ANÁLISIS DE PRÓXIMOS PARTIDOS*
+
+📊 *{count} partidos programados*
+⚽ *Liga:* {league_id}
+⏰ *Actualizado:* {datetime.now().strftime("%H:%M")}
+
+───────────────"""
+        await update.message.reply_text(header, parse_mode='Markdown')
+
+        # Send individual match analyses (limit to first 8 for readability)
+        for i, (_, fx) in enumerate(fixtures_df.head(8).iterrows()):
+            fixture_id = int(fx["fixture_id"])
+            home = str(fx["home_team"])
+            away = str(fx["away_team"])
+            match_date = fx['date'].strftime("%d/%m %H:%M") if pd.notna(fx['date']) else "TBD"
+
+            try:
+                probs = await asyncio.to_thread(_predict_match_inline, home, away, matches)
+                recommendation = _get_recommendation(probs)
+
+                match_msg = f"""⚽ *{home} vs {away}*
+🕐 {match_date}
+
+🎲 *Probabilidades del Modelo:*
+• 1️⃣ Local: {probs['home_win']:.1%}
+• ❌ Empate: {probs['draw']:.1%}
+• 2️⃣ Visitante: {probs['away_win']:.1%}
+• ➕ +2.5 Goles: {probs['over_2_5']:.1%}
+
+💡 *Recomendación:* {recommendation}
+───────────────"""
+                await update.message.reply_text(match_msg, parse_mode='Markdown')
+
+            except Exception as e:
+                logger.error(f"Error analyzing match {home} vs {away}: {e}")
+                continue
+
+        # Send top picks if available
+        if result['picks'] and not result['picks'].empty:
+            picks_text = []
+            for _, row in result['picks'].head(6).iterrows():
+                picks_text.append(
+                    f"• {row['match']} | {row['selection']} ({row['market']}) | "
+                    f"P={row['probability']:.1%} | Cuota={row['odds']:.2f} | EV={row['expected_value']:.1%}"
+                )
+
+            message = MESSAGES['top_picks'].format(matches_text="\n".join(picks_text))
+            await update.message.reply_text(message, parse_mode='Markdown')
+
+            # Send accumulator if available
+            if result['acc']:
+                acc_msg = MESSAGES['accumulator'].format(
+                    legs=int(result['acc']['legs']),
+                    prob=result['acc']['combined_probability'],
+                    odds=result['acc']['combined_odds'],
+                    ev=result['acc']['combined_expected_value']
+                )
+                await update.message.reply_text(acc_msg, parse_mode='Markdown')
+
+            # Check for notification-worthy picks
+            await _check_and_send_notifications(update, context, result['picks'])
+
+    except Exception as exc:
+        await update.message.reply_text(f"❌ Error analizando próximos partidos: {str(exc)}")
 
 
 async def _check_and_send_notifications(update: Update, context: ContextTypes.DEFAULT_TYPE, picks_df):
@@ -459,31 +748,36 @@ async def _check_and_send_notifications(update: Update, context: ContextTypes.DE
     if not _get_notifications_enabled(context):
         return
 
-    # Look for picks with EV > 5% and probability > 60%
+    # Look for picks with EV > 3% and probability > 50% (less restrictive)
     notification_picks = picks_df[
-        (picks_df['expected_value'] > 0.05) &
-        (picks_df['probability'] > 0.60)
+        (picks_df['expected_value'] > 0.03) &
+        (picks_df['probability'] > 0.50)
     ]
 
-    for _, pick in notification_picks.iterrows():
-        confidence = "Muy Alta" if pick['probability'] > 0.70 else "Alta"
+    if notification_picks.empty:
+        return
 
-        alert_msg = MESSAGES['notification_alert'].format(
-            home=pick['match'].split(' vs ')[0],
-            away=pick['match'].split(' vs ')[1],
-            date=date.today().strftime("%d/%m/%Y"),
-            selection=pick['selection'],
-            market=pick['market'],
-            prob=pick['probability'],
-            odds=pick['odds'],
-            ev=pick['expected_value'],
-            confidence=confidence
-        )
+    # Send notification for the best pick
+    best_pick = notification_picks.loc[notification_picks['expected_value'].idxmax()]
 
-        try:
-            await update.message.reply_text(alert_msg, parse_mode='Markdown')
-        except Exception as e:
-            logger.error(f"Error sending notification: {e}")
+    confidence = "Alta" if best_pick['probability'] > 0.65 else "Media"
+
+    alert_msg = MESSAGES['notification_alert'].format(
+        home=best_pick['match'].split(' vs ')[0],
+        away=best_pick['match'].split(' vs ')[1],
+        date=datetime.now().strftime("%d/%m/%Y"),
+        selection=best_pick['selection'],
+        market=best_pick['market'],
+        prob=best_pick['probability'],
+        odds=best_pick['odds'],
+        ev=best_pick['expected_value'],
+        confidence=confidence
+    )
+
+    try:
+        await update.message.reply_text(alert_msg, parse_mode='Markdown')
+    except Exception as e:
+        logger.error(f"Error sending notification: {e}")
 
 
 async def cmd_notificaciones(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -571,10 +865,86 @@ async def cmd_notificaciones(update: Update, context: ContextTypes.DEFAULT_TYPE)
 
     if new_state:
         message = MESSAGES['notifications_enabled']
+        # Send upcoming matches notification immediately when enabled
+        try:
+            await _send_upcoming_matches_notification(update, context)
+        except Exception as e:
+            logger.error(f"Error sending initial notification: {e}")
     else:
         message = MESSAGES['notifications_disabled']
 
     await update.message.reply_text(message, parse_mode='Markdown')
+
+
+async def _send_upcoming_matches_notification(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Send a professional notification about upcoming matches."""
+    try:
+        league_id, season = _current_config(context)
+
+        # Get upcoming fixtures (next 7 days)
+        source = ApiFootballDataSource(api_key=_get_api_key())
+        fixtures_df = await asyncio.to_thread(source.get_upcoming_fixtures, league_id, season, 30)
+
+        if fixtures_df.empty:
+            return
+
+        # Group by date and get next 3 days
+        fixtures_df['date_only'] = fixtures_df['date'].dt.date
+        today = date.today()
+
+        upcoming_dates = []
+        for i in range(7):  # Next 7 days
+            check_date = today + timedelta(days=i)
+            day_fixtures = fixtures_df[fixtures_df['date_only'] == check_date]
+            if not day_fixtures.empty:
+                upcoming_dates.append((check_date, day_fixtures))
+                if len(upcoming_dates) >= 3:  # Limit to 3 days
+                    break
+
+        if not upcoming_dates:
+            return
+
+        # Build notification message
+        lines = []
+        total_matches = 0
+
+        for check_date, day_fixtures in upcoming_dates:
+            date_str = check_date.strftime("%d/%m")
+            day_name = check_date.strftime("%A")
+
+            # Translate day names to Spanish
+            day_translations = {
+                "Monday": "Lunes",
+                "Tuesday": "Martes",
+                "Wednesday": "Miércoles",
+                "Thursday": "Jueves",
+                "Friday": "Viernes",
+                "Saturday": "Sábado",
+                "Sunday": "Domingo"
+            }
+            day_name_es = day_translations.get(day_name, day_name)
+
+            lines.append(f"📅 *{day_name_es} {date_str}*")
+
+            for _, match in day_fixtures.iterrows():
+                home = str(match['home_team'])
+                away = str(match['away_team'])
+                time_str = match['date'].strftime("%H:%M") if pd.notna(match['date']) else "TBD"
+                lines.append(f"  ⚽ {time_str} - {home} vs {away}")
+                total_matches += 1
+
+            lines.append("")
+
+        if total_matches > 0:
+            notification_msg = MESSAGES['upcoming_matches_notification'].format(
+                date=today.strftime("%d/%m/%Y"),
+                count=total_matches,
+                matches_list="\n".join(lines)
+            )
+            await update.message.reply_text(notification_msg, parse_mode='Markdown')
+
+    except Exception as e:
+        logger.error(f"Error sending upcoming matches notification: {e}")
 
 
 async def cmd_comparar_lineas(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -870,9 +1240,10 @@ def main() -> None:
         app.add_handler(CommandHandler("status", cmd_status))
         app.add_handler(CommandHandler("setleague", cmd_setleague))
         app.add_handler(CommandHandler("partido", cmd_predict))  # Changed from predict
-        app.add_handler(CommandHandler("jornada", cmd_jornada))  # Today's matches
+        app.add_handler(CommandHandler("jornada", cmd_jornada))  # Próximos partidos
         app.add_handler(CommandHandler("jornada_manana", cmd_jornada_manana))  # Tomorrow's matches
         app.add_handler(CommandHandler("jornada_pasado", cmd_jornada_pasado))  # Matches in 2 days
+        app.add_handler(CommandHandler("proximos", cmd_proximos))  # Lista de próximos partidos
         app.add_handler(CommandHandler("combinada", cmd_combinada))  # Accumulator
         app.add_handler(CommandHandler("notificaciones", cmd_notificaciones))  # Notifications toggle
         app.add_handler(CommandHandler("comparar_lineas", cmd_comparar_lineas))  # Line comparison
