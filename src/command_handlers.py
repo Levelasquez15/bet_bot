@@ -9,7 +9,7 @@ import pandas as pd
 from telegram import Update
 from telegram.ext import ContextTypes
 
-from .api_client import load_history, get_upcoming_fixtures, get_odds_for_fixture
+from .api_client import load_history, get_upcoming_fixtures, get_odds_for_fixture, get_betting_recommendations
 from .config import MESSAGES, current_config, get_notifications_enabled, set_notifications_enabled, get_api_key, get_telegram_token
 from .prediction_service import predict_match_inline, get_recommendation, analyze_jornada_inline, build_accumulator_inline, backtest_inline
 
@@ -883,3 +883,87 @@ async def cmd_backtest(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
 
     except Exception as exc:
         await update.message.reply_text(f"❌ Error en validación: {str(exc)}")
+
+
+async def cmd_apuestas(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Get betting recommendations for upcoming matches."""
+    try:
+        # Get league from context or use default
+        league_id, season = current_config(context)
+
+        # Map league_id to league name for the new scraper
+        league_mapping = {
+            39: 'Premier League',
+            140: 'La Liga',
+            135: 'Serie A',
+            78: 'Bundesliga',
+            61: 'Ligue 1'
+        }
+
+        league_name = league_mapping.get(league_id, 'Premier League')
+        num_matches = 5  # Default number of matches to analyze
+
+        if context.args:
+            try:
+                num_matches = int(context.args[0])
+                num_matches = max(1, min(num_matches, 10))  # Limit between 1-10
+            except ValueError:
+                pass
+
+        await update.message.reply_text(f"🎯 Generando recomendaciones de apuestas para {league_name}...")
+
+        recommendations = await get_betting_recommendations(league_name, num_matches)
+
+        if recommendations.empty:
+            await update.message.reply_text("❌ No se pudieron generar recomendaciones de apuestas.")
+            return
+
+        # Send header
+        header = f"""🎯 <b>RECOMENDACIONES DE APUESTAS</b>
+
+⚽ <b>Liga:</b> {league_name}
+📊 <b>Partidos analizados:</b> {len(recommendations)}
+⏰ <b>Actualizado:</b> {datetime.now().strftime("%H:%M")}
+
+───────────────"""
+        await update.message.reply_text(header, parse_mode='HTML')
+
+        # Send individual recommendations
+        for i, (_, rec) in enumerate(recommendations.iterrows()):
+            match_date = rec['date'].strftime("%d/%m %H:%M") if pd.notna(rec['date']) else "TBD"
+
+            rec_msg = f"""⚽ <b>{rec['home_team']} vs {rec['away_team']}</b>
+🕐 {match_date}
+
+💡 <b>Recomendación:</b> {rec['recommendation']}
+📊 <b>Probabilidad:</b> {rec['probability']}%
+🎯 <b>Confianza:</b> {rec['confidence']}%
+💰 <b>Cuota sugerida:</b> {rec['suggested_odds']:.2f}
+
+📝 <b>Análisis:</b> {rec['reasoning']}
+───────────────"""
+
+            await update.message.reply_text(rec_msg, parse_mode='HTML')
+
+            # Limit to first 5 recommendations for readability
+            if i >= 4:
+                break
+
+        # Send summary
+        total_confidence = recommendations['confidence'].mean()
+        best_pick = recommendations.loc[recommendations['confidence'].idxmax()]
+
+        summary = f"""📊 <b>RESUMEN</b>
+
+🎯 <b>Mejor apuesta:</b> {best_pick['home_team']} vs {best_pick['away_team']}
+💡 <b>Recomendación:</b> {best_pick['recommendation']}
+🎯 <b>Confianza:</b> {best_pick['confidence']}%
+
+📈 <b>Confianza promedio:</b> {total_confidence:.1f}%
+⚽ <b>Total partidos:</b> {len(recommendations)}"""
+
+        await update.message.reply_text(summary, parse_mode='HTML')
+
+    except Exception as exc:
+        logger.error(f"Error in cmd_apuestas: {exc}")
+        await update.message.reply_text(f"❌ Error generando recomendaciones: {str(exc)}")

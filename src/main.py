@@ -5,7 +5,8 @@ import logging
 from .command_handlers import (
     cmd_start, cmd_status, cmd_setleague, cmd_predict, cmd_jornada,
     cmd_jornada_manana, cmd_jornada_pasado, cmd_proximos, cmd_combinada,
-    cmd_notificaciones, cmd_comparar_lineas, cmd_analyze_next, cmd_backtest
+    cmd_notificaciones, cmd_comparar_lineas, cmd_analyze_next, cmd_backtest,
+    cmd_apuestas
 )
 from .config import get_telegram_token
 
@@ -44,6 +45,7 @@ def main() -> None:
         app.add_handler(CommandHandler("comparar_lineas", cmd_comparar_lineas))
         app.add_handler(CommandHandler("analyze_next", cmd_analyze_next))
         app.add_handler(CommandHandler("backtest", cmd_backtest))
+        app.add_handler(CommandHandler("apuestas", cmd_apuestas))
         logger.info("All commands registered successfully")
 
         logger.info("🤖 BetBot iniciado. Esperando mensajes...")

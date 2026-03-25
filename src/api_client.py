@@ -118,32 +118,40 @@ async def get_upcoming_fixtures(league_id: int, season: int, next_n: int = 10) -
     except Exception as e:
         logger.error(f"Error getting upcoming fixtures: {e}")
         return pd.DataFrame()
-        # Map league_id to league name (simplified mapping)
-        league_mapping = {
-            39: "English Premier League",
-            140: "La Liga",
-            135: "Serie A",
-            78: "Bundesliga",
-            61: "Ligue 1"
-        }
 
-        league_name = league_mapping.get(league_id, "English Premier League")
 
-        # Use the new API scraper
-        fixtures_df = await asyncio.to_thread(
+async def get_betting_recommendations(league_name: str = "Premier League", num_matches: int = 5) -> pd.DataFrame:
+    """Get betting recommendations for upcoming matches."""
+    try:
+        if api_scraper is None:
+            logger.error("No scraper available")
+            return pd.DataFrame()
+
+        # Get upcoming matches first
+        upcoming_matches = await asyncio.to_thread(
             api_scraper.get_upcoming_matches,
             league_name=league_name,
-            days_ahead=14  # Get matches for next 2 weeks
+            days_ahead=7
         )
 
-        # Limit to next_n fixtures
-        if not fixtures_df.empty:
-            fixtures_df = fixtures_df.head(next_n)
+        if upcoming_matches.empty:
+            logger.warning(f"No upcoming matches found for {league_name}")
+            return pd.DataFrame()
 
-        logger.info(f"Loaded {len(fixtures_df)} upcoming fixtures for {league_name}")
-        return fixtures_df
+        # Limit to requested number of matches
+        upcoming_matches = upcoming_matches.head(num_matches)
+
+        # Generate betting recommendations
+        recommendations = await asyncio.to_thread(
+            api_scraper.generate_betting_recommendations,
+            upcoming_matches
+        )
+
+        logger.info(f"Generated {len(recommendations)} betting recommendations for {league_name}")
+        return recommendations
+
     except Exception as e:
-        logger.error(f"Error getting upcoming fixtures: {e}")
+        logger.error(f"Error getting betting recommendations: {e}")
         return pd.DataFrame()
 
 
