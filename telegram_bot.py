@@ -247,14 +247,21 @@ def _get_recommendation(probs: Dict) -> str:
 
 
 async def cmd_start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    league_id, season = _current_config(context)
-    notifications_status = "✅ ACTIVADAS" if _get_notifications_enabled(context) else "❌ DESACTIVADAS"
-    message = MESSAGES['start'].format(
-        league=league_id,
-        season=season,
-        notifications=notifications_status
-    )
-    await update.message.reply_text(message, parse_mode='Markdown')
+    try:
+        logger.info("cmd_start called")
+        league_id, season = _current_config(context)
+        notifications_status = "✅ ACTIVADAS" if _get_notifications_enabled(context) else "❌ DESACTIVADAS"
+        message = MESSAGES['start'].format(
+            league=league_id,
+            season=season,
+            notifications=notifications_status
+        )
+        logger.info(f"Sending start message: {message[:100]}...")
+        await update.message.reply_text(message, parse_mode='Markdown')
+        logger.info("Start message sent successfully")
+    except Exception as e:
+        logger.error(f"Error in cmd_start: {e}")
+        await update.message.reply_text(f"Error: {str(e)}")
 
 
 async def cmd_status(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -780,20 +787,6 @@ async def _check_and_send_notifications(update: Update, context: ContextTypes.DE
         logger.error(f"Error sending notification: {e}")
 
 
-async def cmd_notificaciones(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    """Toggle notifications on/off."""
-    currently_enabled = _get_notifications_enabled(context)
-    new_state = not currently_enabled
-    _set_notifications_enabled(context, new_state)
-
-    if new_state:
-        message = MESSAGES['notifications_enabled']
-    else:
-        message = MESSAGES['notifications_disabled']
-
-    await update.message.reply_text(message, parse_mode='Markdown')
-
-
 async def cmd_combinada(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     """Generate accumulator with specified number of legs."""
     if not context.args:
@@ -1233,6 +1226,7 @@ def main() -> None:
         logger.info("Telegram token loaded successfully")
 
         app = Application.builder().token(token).build()
+        logger.info("Application created successfully")
 
         # Register commands
         app.add_handler(CommandHandler("start", cmd_start))
@@ -1249,6 +1243,7 @@ def main() -> None:
         app.add_handler(CommandHandler("comparar_lineas", cmd_comparar_lineas))  # Line comparison
         app.add_handler(CommandHandler("analyze_next", cmd_analyze_next))
         app.add_handler(CommandHandler("backtest", cmd_backtest))
+        logger.info("All commands registered successfully")
 
         logger.info("🤖 BetBot iniciado. Esperando mensajes...")
         print("🤖 BetBot iniciado. Esperando mensajes...")
