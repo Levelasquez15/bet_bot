@@ -65,19 +65,19 @@ jobs:
                 --registry-server "$ACR_LOGIN_SERVER" \
                 --registry-username "${{ secrets.ACR_USERNAME }}" \
                 --registry-password "${{ secrets.ACR_PASSWORD }}" \
-                --secrets api-football-key='${{ secrets.API_FOOTBALL_KEY }}' telegram-bot-token='${{ secrets.TELEGRAM_TOKEN }}' \
-                --env-vars API_FOOTBALL_KEY=secretref:api-football-key TELEGRAM_TOKEN=secretref:telegram-bot-token TELEGRAM_BOT_TOKEN=secretref:telegram-bot-token \
+                --secrets telegram-bot-token='${{ secrets.TELEGRAM_TOKEN }}' \
+                --env-vars TELEGRAM_TOKEN=secretref:telegram-bot-token TELEGRAM_BOT_TOKEN=secretref:telegram-bot-token \
                 --min-replicas 1 \
                 --max-replicas 1
             else
               az containerapp secret set \
                 --name "$CONTAINER_APP_NAME" \
                 --resource-group "$RESOURCE_GROUP" \
-                --secrets api-football-key='${{ secrets.API_FOOTBALL_KEY }}' telegram-bot-token='${{ secrets.TELEGRAM_TOKEN }}'
+                --secrets telegram-bot-token='${{ secrets.TELEGRAM_TOKEN }}'
 
               az containerapp update \
                 --name "$CONTAINER_APP_NAME" \
                 --resource-group "$RESOURCE_GROUP" \
                 --image "$IMAGE" \
-                --set-env-vars API_FOOTBALL_KEY=secretref:api-football-key TELEGRAM_TOKEN=secretref:telegram-bot-token TELEGRAM_BOT_TOKEN=secretref:telegram-bot-token
+                --set-env-vars TELEGRAM_TOKEN=secretref:telegram-bot-token TELEGRAM_BOT_TOKEN=secretref:telegram-bot-token
             fi
