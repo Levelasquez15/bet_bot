@@ -46,24 +46,24 @@ MAX_FIXTURES_ANALYSIS = 12
 
 # Mensajes en español mejorados
 MESSAGES = {
-    'start': """🤖 *BetBot - Pronósticos Deportivos*
+    'start': """🤖 *BetBot - Pronosticos Deportivos*
 
-¡Hola! Soy tu asistente de pronósticos deportivos con IA.
+¡Hola! Soy tu asistente de pronosticos deportivos con IA.
 
 📊 *Comandos disponibles:*
-/jornada - Análisis de partidos próximos (hoy y próximos días)
-/jornada_manana - Análisis específico de mañana
-/jornada_pasado - Análisis específico en 2 días
-/proximos - Ver lista completa de próximos partidos
-/partido `<Local>` vs `<Visitante>` - Análisis específico
-/combinada - Generar combinada automática
-/comparar_lineas `<Local>` vs `<Visitante>` - Comparar cuotas
+/jornada - Analisis de partidos proximos (hoy y proximos dias)
+/jornada_manana - Analisis especifico de manana
+/jornada_pasado - Analisis especifico en 2 dias
+/proximos - Ver lista completa de proximos partidos
+/partido `Local` vs `Visitante` - Analisis especifico
+/combinada - Generar combinada automatica
+/comparar_lineas `Local` vs `Visitante` - Comparar cuotas
 /notificaciones - Activar/desactivar alertas de oportunidades
-/status - Estado del bot y configuración
-/setleague `<id>` `<temporada>` - Cambiar liga y temporada
+/status - Estado del bot y configuracion
+/setleague `id` `temporada` - Cambiar liga y temporada
 
 💡 *Para activar notificaciones de oportunidades:* Usa /notificaciones
-⚙️ *Configuración actual:* Liga={league}, Temporada={season}
+⚙️ *Configuracion actual:* Liga={league}, Temporada={season}
 📱 *Notificaciones:* {notifications}""",
 
     'status': """📊 *Estado del Bot*
@@ -118,7 +118,7 @@ MESSAGES = {
 
 ⚠️ *Recuerda:* Juego responsable""",
 
-    'notification_alert': """🚨 *¡ALERTA DE OPORTUNIDAD!*
+    'notification_alert': """🚨 *ALERTA DE OPORTUNIDAD!*
 
 ⚽ *{home} vs {away}*
 🕐 {date}
@@ -130,7 +130,7 @@ MESSAGES = {
 
 💡 *Confianza:* {confidence}
 
-⚠️ *Actúa rápido - las cuotas cambian*""",
+⚠️ *Actua rapido - las cuotas cambian*""",
 
     'no_matches': "📅 No hay partidos programados para {date} en la liga configurada.",
 
@@ -143,13 +143,13 @@ MESSAGES = {
     'notifications_enabled': "✅ *Notificaciones activadas*\n\nRecibirás alertas automáticas cuando el bot encuentre oportunidades de valor (EV >3% y prob >50%) durante los análisis de jornada.",
     'notifications_disabled': "❌ *Notificaciones desactivadas*",
 
-    'upcoming_matches_notification': """📅 *PARTIDOS PRÓXIMOS - {date}*
+    'upcoming_matches_notification': """📅 *PARTIDOS PROXIMOS - {date}*
 
 ⚽ *{count} partidos programados*
 
 {matches_list}
 
-💡 *Usa /jornada para análisis completo*
+💡 *Usa /jornada para analisis completo*
 📊 *Usa /notificaciones para activar alertas de oportunidades*""",
 
     'invalid_format': "❌ Formato inválido. Usa: {usage}",
