@@ -219,7 +219,7 @@ def _get_recommendation(probs: Dict) -> str:
 async def cmd_start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     league_id, season = _current_config(context)
     message = MESSAGES['start'].format(league=league_id, season=season)
-    await update.message.reply_text(message, parse_mode='Markdown')
+    await update.message.reply_text(message)
 
 
 async def cmd_status(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
