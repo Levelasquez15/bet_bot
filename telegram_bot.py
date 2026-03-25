@@ -44,15 +44,15 @@ DEFAULT_LEAGUE_ID = 39  # Premier League
 DEFAULT_SEASON = 2023  # Usar temporada con datos disponibles
 MAX_FIXTURES_ANALYSIS = 12
 
-# Mensajes en MarkdownV2 con caracteres escapados
+# Mensajes en formato Markdown (viejo, más permisivo)
 MESSAGES = {
     'start': """*BetBot - Pronosticos Deportivos*
 
-Hola\\! Soy tu asistente de pronosticos deportivos con IA\\.
+Hola! Soy tu asistente de pronosticos deportivos con IA.
 
 *Comandos disponibles:*
-/jornada - Analisis de partidos proximos \\(hoy y proximos dias\\)
-/jornada_manana - Analisis especifico de mañana
+/jornada - Analisis de partidos proximos (hoy y proximos dias)
+/jornada_manana - Analisis especifico de manana
 /jornada_pasado - Analisis especifico en 2 dias
 /proximos - Ver lista completa de proximos partidos
 /partido `Local` vs `Visitante` - Analisis especifico
@@ -63,7 +63,7 @@ Hola\\! Soy tu asistente de pronosticos deportivos con IA\\.
 /setleague `id` `temporada` - Cambiar liga y temporada
 
 *Para activar notificaciones de oportunidades:* Usa /notificaciones
-*Configuracion actual:* Liga\\={league}, Temporada\\={season}
+*Configuracion actual:* Liga={league}, Temporada={season}
 *Notificaciones:* {notifications}""",
 
     'status': """*Estado del Bot*
@@ -92,7 +92,7 @@ Modelo listo para analisis""",
 - Local: {home_win:.1%}
 - Empate: {draw:.1%}
 - Visitante: {away_win:.1%}
-- +2\\.5 Goles: {over:.1%}
+- +2.5 Goles: {over:.1%}
 
 *Fuerza de Ataque:*
 - {home}: {lambda_home:.2f}
@@ -256,7 +256,7 @@ async def cmd_start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
             notifications=notifications_status
         )
         logger.info(f"Sending start message: {message[:100]}...")
-        await update.message.reply_text(message, parse_mode='MarkdownV2')
+        await update.message.reply_text(message, parse_mode='Markdown')
         logger.info("Start message sent successfully")
     except Exception as e:
         logger.error(f"Error in cmd_start: {e}")
