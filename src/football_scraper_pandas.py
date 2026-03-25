@@ -58,148 +58,126 @@ class FootballDataScraper:
 
     def get_upcoming_matches(self, league_name: str = "Premier League", days_ahead: int = 7) -> pd.DataFrame:
         """
-        Get upcoming matches from FBref
+        Get upcoming matches - using mock data for now until FBref scraping is fixed
         """
         try:
-            logger.info(f"🔍 Getting upcoming matches for {league_name} from FBref")
+            logger.info(f"🔍 Getting upcoming matches for {league_name} (using mock data)")
 
-            league_info = self.league_mappings.get(league_name)
-            if not league_info:
-                logger.error(f"League {league_name} not supported")
+            # Mock data for testing - replace with real scraping later
+            mock_matches = {
+                'Premier League': [
+                    {'date': '2024-12-15 15:00', 'home_team': 'Arsenal', 'away_team': 'Chelsea'},
+                    {'date': '2024-12-16 17:30', 'home_team': 'Manchester City', 'away_team': 'Liverpool'},
+                    {'date': '2024-12-17 20:00', 'home_team': 'Manchester United', 'away_team': 'Tottenham'},
+                ],
+                'La Liga': [
+                    {'date': '2024-12-15 16:15', 'home_team': 'Real Madrid', 'away_team': 'Barcelona'},
+                    {'date': '2024-12-16 18:30', 'home_team': 'Atletico Madrid', 'away_team': 'Sevilla'},
+                ],
+                'Serie A': [
+                    {'date': '2024-12-15 20:45', 'home_team': 'Juventus', 'away_team': 'Inter Milan'},
+                    {'date': '2024-12-16 15:00', 'home_team': 'AC Milan', 'away_team': 'Napoli'},
+                ],
+                'Bundesliga': [
+                    {'date': '2024-12-14 15:30', 'home_team': 'Bayern Munich', 'away_team': 'Borussia Dortmund'},
+                ],
+                'Ligue 1': [
+                    {'date': '2024-12-15 21:00', 'home_team': 'PSG', 'away_team': 'Marseille'},
+                ]
+            }
+
+            league_matches = mock_matches.get(league_name, [])
+            if not league_matches:
+                logger.warning(f"No mock data for {league_name}")
                 return pd.DataFrame()
 
-            fbref_id = league_info['fbref']
-            url = f"https://fbref.com/en/comps/{fbref_id}/schedule/{league_name.replace(' ', '-')}-Scores-and-Fixtures"
+            # Convert to DataFrame
+            df = pd.DataFrame(league_matches)
 
-            response = self.session.get(url)
-            response.raise_for_status()
+            # Convert date strings to datetime
+            df['date'] = pd.to_datetime(df['date'])
 
-            # Read all tables from the page
-            tables = pd.read_html(response.text)
-
-            # Find the schedule table (usually the first or second table)
-            schedule_table = None
-            for table in tables:
-                if 'Date' in table.columns and 'Home' in table.columns:
-                    schedule_table = table
-                    break
-
-            if schedule_table is None:
-                logger.error("Could not find schedule table")
-                return pd.DataFrame()
-
-            # Clean and filter upcoming matches
-            df = schedule_table.copy()
-
-            # Convert date column
-            df['Date'] = pd.to_datetime(df['Date'], errors='coerce')
-
-            # Filter out past matches and matches too far in the future
-            now = datetime.now()
-            cutoff_date = now + timedelta(days=days_ahead)
+            # Filter by date range
+            now = pd.Timestamp.now()
+            cutoff_date = now + pd.Timedelta(days=days_ahead)
 
             upcoming = df[
-                (df['Date'] >= now) &
-                (df['Date'] <= cutoff_date) &
-                (df['Home'].notna()) &
-                (df['Away'].notna())
+                (df['date'] >= now) &
+                (df['date'] <= cutoff_date)
             ]
 
-            # Standardize column names
+            # Add required columns
             result_df = pd.DataFrame({
                 'fixture_id': range(len(upcoming)),
-                'date': upcoming['Date'],
-                'home_team': upcoming['Home'],
-                'away_team': upcoming['Away'],
+                'date': upcoming['date'],
+                'home_team': upcoming['home_team'],
+                'away_team': upcoming['away_team'],
                 'league': league_name,
-                'source': 'FBref'
+                'source': 'MockData'
             })
 
-            logger.info(f"✅ Found {len(result_df)} upcoming matches from FBref")
+            logger.info(f"✅ Found {len(result_df)} upcoming matches (mock data)")
             return result_df
 
         except Exception as e:
-            logger.error(f"❌ Error getting upcoming matches from FBref: {e}")
+            logger.error(f"❌ Error getting upcoming matches: {e}")
             return pd.DataFrame()
 
     def get_historical_matches(self, league_name: str = "Premier League", season: str = "2023-2024", limit: int = 100) -> pd.DataFrame:
         """
-        Get historical matches from FBref
+        Get historical matches - using mock data for now
         """
         try:
-            logger.info(f"🔍 Getting historical matches for {league_name} {season} from FBref")
+            logger.info(f"🔍 Getting historical matches for {league_name} {season} (mock data)")
 
-            league_info = self.league_mappings.get(league_name)
-            if not league_info:
-                logger.error(f"League {league_name} not supported")
+            # Mock historical data
+            mock_historical = {
+                'Premier League': [
+                    {'date': '2024-12-01', 'home_team': 'Arsenal', 'away_team': 'Chelsea', 'home_score': 2, 'away_score': 1},
+                    {'date': '2024-11-30', 'home_team': 'Manchester City', 'away_team': 'Liverpool', 'home_score': 3, 'away_score': 0},
+                    {'date': '2024-11-29', 'home_team': 'Manchester United', 'away_team': 'Tottenham', 'home_score': 1, 'away_score': 1},
+                    {'date': '2024-11-28', 'home_team': 'Newcastle', 'away_team': 'Aston Villa', 'home_score': 2, 'away_score': 2},
+                    {'date': '2024-11-27', 'home_team': 'Brighton', 'away_team': 'Crystal Palace', 'home_score': 1, 'away_score': 0},
+                ],
+                'La Liga': [
+                    {'date': '2024-12-01', 'home_team': 'Real Madrid', 'away_team': 'Barcelona', 'home_score': 3, 'away_score': 2},
+                    {'date': '2024-11-30', 'home_team': 'Atletico Madrid', 'away_team': 'Sevilla', 'home_score': 1, 'away_score': 1},
+                ],
+                'Serie A': [
+                    {'date': '2024-12-01', 'home_team': 'Juventus', 'away_team': 'Inter Milan', 'home_score': 2, 'away_score': 0},
+                    {'date': '2024-11-30', 'home_team': 'AC Milan', 'away_team': 'Napoli', 'home_score': 1, 'away_score': 3},
+                ]
+            }
+
+            league_matches = mock_historical.get(league_name, [])
+            if not league_matches:
+                logger.warning(f"No mock historical data for {league_name}")
                 return pd.DataFrame()
 
-            fbref_id = league_info['fbref']
-            url = f"https://fbref.com/en/comps/{fbref_id}/{season}/schedule/{league_name.replace(' ', '-')}-Scores-and-Fixtures"
+            # Convert to DataFrame and limit results
+            df = pd.DataFrame(league_matches[:limit])
 
-            response = self.session.get(url)
-            response.raise_for_status()
+            # Convert date strings to datetime
+            df['date'] = pd.to_datetime(df['date'])
 
-            tables = pd.read_html(response.text)
-
-            # Find the results table
-            results_table = None
-            for table in tables:
-                if 'Date' in table.columns and 'Home' in table.columns and 'Score' in table.columns:
-                    results_table = table
-                    break
-
-            if results_table is None:
-                logger.error("Could not find results table")
-                return pd.DataFrame()
-
-            # Clean the data
-            df = results_table.copy()
-
-            # Convert date column
-            df['Date'] = pd.to_datetime(df['Date'], errors='coerce')
-
-            # Filter out rows without scores (future matches)
-            historical = df[
-                (df['Score'].notna()) &
-                (df['Score'] != '') &
-                (df['Home'].notna()) &
-                (df['Away'].notna())
-            ].head(limit)
-
-            # Parse scores
-            def parse_score(score_str):
-                if pd.isna(score_str) or score_str == '':
-                    return None, None
-                try:
-                    home_score, away_score = str(score_str).split('–')
-                    return int(home_score), int(away_score)
-                except:
-                    return None, None
-
-            historical['home_score'], historical['away_score'] = zip(*historical['Score'].apply(parse_score))
-
-            # Standardize column names
+            # Add required columns
             result_df = pd.DataFrame({
-                'fixture_id': range(len(historical)),
-                'date': historical['Date'],
-                'home_team': historical['Home'],
-                'away_team': historical['Away'],
-                'home_score': historical['home_score'],
-                'away_score': historical['away_score'],
+                'fixture_id': range(len(df)),
+                'date': df['date'],
+                'home_team': df['home_team'],
+                'away_team': df['away_team'],
+                'home_score': df['home_score'],
+                'away_score': df['away_score'],
                 'league': league_name,
                 'season': season,
-                'source': 'FBref'
+                'source': 'MockData'
             })
 
-            # Remove rows with invalid scores
-            result_df = result_df.dropna(subset=['home_score', 'away_score'])
-
-            logger.info(f"✅ Found {len(result_df)} historical matches from FBref")
+            logger.info(f"✅ Found {len(result_df)} historical matches (mock data)")
             return result_df
 
         except Exception as e:
-            logger.error(f"❌ Error getting historical matches from FBref: {e}")
+            logger.error(f"❌ Error getting historical matches: {e}")
             return pd.DataFrame()
 
     def get_team_stats(self, league_name: str = "Premier League", season: str = "2023-2024") -> pd.DataFrame:
