@@ -433,7 +433,7 @@ async def _analyze_jornada_by_date(update: Update, context: ContextTypes.DEFAULT
             picks_text = []
             for _, row in result['picks'].head(6).iterrows():
                 picks_text.append(
-                    f"• {row['match']} | {row['selection']} ({row['market']}) | "
+                    f"• {row['match']} | {row['selection']} \\({row['market']}\\) | "
                     f"P={row['probability']:.1%} | Cuota={row['odds']:.2f} | EV={row['expected_value']:.1%}"
                 )
 
@@ -725,7 +725,7 @@ async def _analyze_upcoming_matches(update: Update, context: ContextTypes.DEFAUL
             picks_text = []
             for _, row in result['picks'].head(6).iterrows():
                 picks_text.append(
-                    f"• {row['match']} | {row['selection']} ({row['market']}) | "
+                    f"• {row['match']} | {row['selection']} \\({row['market']}\\) | "
                     f"P={row['probability']:.1%} | Cuota={row['odds']:.2f} | EV={row['expected_value']:.1%}"
                 )
 
@@ -1147,7 +1147,7 @@ async def cmd_analyze_next(update: Update, context: ContextTypes.DEFAULT_TYPE) -
         lines = ["🎯 *Top picks por partido:*"]
         for _, row in picks_df.head(8).iterrows():
             lines.append(
-                f"• {row['match']} | {row['selection']} ({row['market']}) | "
+                f"• {row['match']} | {row['selection']} \\({row['market']}\\) | "
                 f"P={row['probability']:.1%} | Cuota={row['odds']:.2f} | EV={row['expected_value']:.1%}"
             )
 
