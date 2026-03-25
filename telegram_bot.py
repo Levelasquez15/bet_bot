@@ -3,7 +3,7 @@ from __future__ import annotations
 import asyncio
 import logging
 import os
-from datetime import datetime, date, timedelta
+from datetime import datetime, date, timedelta, timezone
 from typing import Dict, Tuple, List
 
 from dotenv import load_dotenv
@@ -41,7 +41,7 @@ def _import_modules():
 load_dotenv()
 
 DEFAULT_LEAGUE_ID = 39  # Premier League
-DEFAULT_SEASON = datetime.utcnow().year
+DEFAULT_SEASON = datetime.now(timezone.utc).year
 MAX_FIXTURES_ANALYSIS = 12
 
 # Mensajes en español mejorados
@@ -575,6 +575,99 @@ async def cmd_notificaciones(update: Update, context: ContextTypes.DEFAULT_TYPE)
         message = MESSAGES['notifications_disabled']
 
     await update.message.reply_text(message, parse_mode='Markdown')
+
+
+async def cmd_comparar_lineas(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Compare betting lines for a specific match."""
+    raw = " ".join(context.args).strip()
+    if not raw or ("|" not in raw and "vs" not in raw.lower()):
+        await update.message.reply_text("Uso: /comparar_lineas `<Local>` vs `<Visitante>`\nEjemplo: /comparar_lineas Real Madrid vs Barcelona", parse_mode='Markdown')
+        return
+
+    # Parse different formats: "Local | Visitante" or "Local vs Visitante"
+    if "|" in raw:
+        home_team, away_team = [p.strip() for p in raw.split("|", maxsplit=1)]
+    else:
+        parts = raw.lower().split("vs")
+        if len(parts) != 2:
+            await update.message.reply_text("Formato inválido. Usa: /comparar_lineas Real Madrid vs Barcelona", parse_mode='Markdown')
+            return
+        home_team, away_team = [p.strip() for p in parts]
+
+    if not home_team or not away_team:
+        await update.message.reply_text("Equipos inválidos. Ejemplo: /comparar_lineas Real Madrid vs Barcelona", parse_mode='Markdown')
+        return
+
+    await update.message.reply_text("🔍 Comparando líneas de apuestas...")
+
+    try:
+        matches = await _load_history(context)
+        if matches.empty:
+            await update.message.reply_text(MESSAGES['error_data'])
+            return
+
+        # Get league config
+        league_id, season = _current_config(context)
+
+        # Find fixture
+        _import_modules()
+        source = ApiFootballDataSource(api_key=_get_api_key())
+        fixtures_df = source.get_upcoming_fixtures(league_id=league_id, season=season, next_n=20)
+
+        # Find matching fixture
+        fixture_row = None
+        for _, fx in fixtures_df.iterrows():
+            if (str(fx['home_team']).lower().strip() == home_team.lower().strip() and
+                str(fx['away_team']).lower().strip() == away_team.lower().strip()):
+                fixture_row = fx
+                break
+
+        if fixture_row is None:
+            await update.message.reply_text(f"❌ No se encontró el partido: {home_team} vs {away_team}")
+            return
+
+        fixture_id = int(fixture_row['fixture_id'])
+        fixture_date = pd.to_datetime(fixture_row['fixture_date']).strftime("%d/%m/%Y %H:%M")
+
+        # Get odds and compare lines
+        odds_df = source.get_odds_for_fixture(fixture_id)
+        if odds_df.empty:
+            await update.message.reply_text("❌ No hay cuotas disponibles para este partido")
+            return
+
+        # Get model prediction
+        probs = await asyncio.to_thread(_predict_match_inline, home_team, away_team, matches)
+
+        # Compare lines
+        recommender = BettingRecommender()
+        compared_df = recommender.compare_lines(fixture_id, home_team, away_team, probs, odds_df)
+
+        if compared_df.empty:
+            await update.message.reply_text("❌ No se pudieron comparar las líneas")
+            return
+
+        # Format results
+        lines = [f"🏆 *Comparación de líneas: {home_team} vs {away_team}*"]
+        lines.append(f"📅 Fecha: {fixture_date}")
+        lines.append("")
+
+        # Group by bet type
+        for bet_type in compared_df['bet_type'].unique():
+            type_df = compared_df[compared_df['bet_type'] == bet_type]
+            if not type_df.empty:
+                best_row = type_df.loc[type_df['expected_value'].idxmax()]
+                lines.append(f"🎯 *{bet_type}*")
+                lines.append(f"  📊 Prob. modelo: {best_row['model_prob']:.1%}")
+                lines.append(f"  💰 Mejor cuota: {best_row['best_odds']:.2f}")
+                lines.append(f"  📈 EV: {best_row['expected_value']:.1%}")
+                lines.append(f"  🏦 Casa: {best_row['bookmaker']}")
+                lines.append("")
+
+        message = "\n".join(lines)
+        await update.message.reply_text(message, parse_mode='Markdown')
+
+    except Exception as exc:
+        await update.message.reply_text(f"❌ Error comparando líneas: {str(exc)}")
 
 
 def _analyze_jornada_inline(matches: pd.DataFrame, fixtures_df: pd.DataFrame) -> Dict:
