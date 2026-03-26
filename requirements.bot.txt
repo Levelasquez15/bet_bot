@@ -1,0 +1,10 @@
+beautifulsoup4>=4.12.3
+numpy>=1.26.4
+pandas>=2.2.2
+python-dateutil>=2.9.0.post0
+python-dotenv>=1.0.0
+python-telegram-bot>=21.6
+requests>=2.32.3
+scipy>=1.13.1
+soccerdata==1.8.8
+seleniumbase==4.38.2

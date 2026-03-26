@@ -332,13 +332,80 @@ async def on_cal_match_action(update: Update, context: ContextTypes.DEFAULT_TYPE
     matches = context.user_data.get("current_matches_list", [])
 
     if action == "auto":
-        # Stub: en el siguiente paso conectamos con el análisis Poisson/soccerdata
-        await query.edit_message_text(
-            f"✅ Modo auto seleccionado para <b>{date_token}</b>.\n\n"
-            f"Por ahora, esta entrega dejó listo el calendario/fixtures y la selección.\n"
-            f"El análisis con Poisson vendrá en la siguiente fase.",
-            parse_mode="HTML",
-        )
+        await query.edit_message_text("🔄 Analizando todos los partidos automáticamente...\n\nEsto puede tomar unos segundos.")
+
+        # Convert matches to DataFrame for analysis
+        fixtures_data = []
+        for m in matches:
+            fixtures_data.append({
+                'fixture_id': m.get('match_id', 0),
+                'home_team': m['home'],
+                'away_team': m['away'],
+                'league': m['league']
+            })
+
+        if not fixtures_data:
+            await query.edit_message_text("❌ No hay partidos para analizar en esta fecha.")
+            return ConversationHandler.END
+
+        fixtures_df = pd.DataFrame(fixtures_data)
+
+        # Get historical matches for the league (mock data for now)
+        # In production, this would come from soccerdata historical data
+        mock_historical = pd.DataFrame({
+            'home_team': ['Team A', 'Team B', 'Team C'],
+            'away_team': ['Team D', 'Team E', 'Team F'],
+            'home_goals': [2, 1, 0],
+            'away_goals': [1, 1, 2],
+            'date': pd.date_range('2024-01-01', periods=3)
+        })
+
+        try:
+            from .prediction_service import analyze_jornada_inline
+            result = await analyze_jornada_inline(mock_historical, fixtures_df)
+
+            if result.get("error"):
+                await query.edit_message_text(f"❌ Error en análisis: {result['error']}")
+                return ConversationHandler.END
+
+            analyzed_matches = result.get("analyzed_matches", [])
+
+            if not analyzed_matches:
+                await query.edit_message_text("❌ No se pudieron analizar los partidos.")
+                return ConversationHandler.END
+
+            # Format response
+            response_lines = [f"🎯 <b>Análisis automático para {date_token}</b>\n"]
+
+            for match in analyzed_matches:
+                home = match['home_team']
+                away = match['away_team']
+                best_pick = match.get('best_pick')
+
+                response_lines.append(f"\n🏟️ <b>{home} vs {away}</b>")
+
+                if best_pick:
+                    response_lines.append(f"✅ Recomendación: {best_pick['description']}")
+                    response_lines.append(".2f"                else:
+                    response_lines.append("❌ No hay recomendaciones confiables")
+
+            # Add accumulator if available
+            acc = result.get("acc")
+            if acc:
+                response_lines.append(f"\n🎰 <b>Combinada automática:</b>")
+                response_lines.append(f"Legs: {len(acc.get('legs', []))}")
+                response_lines.append(".2f"
+            response = "\n".join(response_lines)
+
+            # Split long messages if needed
+            if len(response) > 4000:
+                response = response[:4000] + "\n\n... (mensaje truncado)"
+
+            await query.edit_message_text(response, parse_mode="HTML")
+
+        except Exception as e:
+            await query.edit_message_text(f"❌ Error durante el análisis: {str(e)}")
+
         return ConversationHandler.END
 
     if action == "manual":
@@ -425,12 +492,67 @@ async def on_msel_analyze(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
         return CAL_PICK_MATCHES
 
     selected = [m for m in matches if int(m["internal_id"]) in selected_ids]
-    await query.edit_message_text(
-        f"✅ Selección lista ({len(selected)} partido(s)) para <b>{date_token}</b>.\n\n"
-        f"Por ahora, esta entrega solo dejó el calendario y la selección.\n"
-        f"El análisis (Poisson) vendrá en la siguiente fase.",
-        parse_mode="HTML",
-    )
+
+    await query.edit_message_text("🔄 Analizando partidos seleccionados...\n\nEsto puede tomar unos segundos.")
+
+    # Convert selected matches to DataFrame
+    fixtures_data = []
+    for m in selected:
+        fixtures_data.append({
+            'fixture_id': m.get('match_id', 0),
+            'home_team': m['home'],
+            'away_team': m['away'],
+            'league': m['league']
+        })
+
+    fixtures_df = pd.DataFrame(fixtures_data)
+
+    # Get historical matches (mock data for now)
+    mock_historical = pd.DataFrame({
+        'home_team': ['Team A', 'Team B', 'Team C'],
+        'away_team': ['Team D', 'Team E', 'Team F'],
+        'home_goals': [2, 1, 0],
+        'away_goals': [1, 1, 2],
+        'date': pd.date_range('2024-01-01', periods=3)
+    })
+
+    try:
+        from .prediction_service import analyze_jornada_inline
+        result = await analyze_jornada_inline(mock_historical, fixtures_df)
+
+        if result.get("error"):
+            await query.edit_message_text(f"❌ Error en análisis: {result['error']}")
+            return ConversationHandler.END
+
+        analyzed_matches = result.get("analyzed_matches", [])
+
+        # Format response
+        response_lines = [f"🎯 <b>Análisis manual para {date_token}</b>\n"]
+        response_lines.append(f"Partidos seleccionados: {len(selected)}\n")
+
+        for match in analyzed_matches:
+            home = match['home_team']
+            away = match['away_team']
+            best_pick = match.get('best_pick')
+
+            response_lines.append(f"\n🏟️ <b>{home} vs {away}</b>")
+
+            if best_pick:
+                response_lines.append(f"✅ Recomendación: {best_pick['description']}")
+                response_lines.append(".2f"            else:
+                response_lines.append("❌ No hay recomendaciones confiables")
+
+        response = "\n".join(response_lines)
+
+        # Split long messages if needed
+        if len(response) > 4000:
+            response = response[:4000] + "\n\n... (mensaje truncado)"
+
+        await query.edit_message_text(response, parse_mode="HTML")
+
+    except Exception as e:
+        await query.edit_message_text(f"❌ Error durante el análisis: {str(e)}")
+
     return ConversationHandler.END
 
 

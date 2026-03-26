@@ -53,7 +53,7 @@ def main() -> None:
 
         logger.info("🤖 BetBot iniciado. Esperando mensajes...")
         print("🤖 BetBot iniciado. Esperando mensajes...")
-        app.run_polling(allowed_updates=["message", "edited_message"])
+        app.run_polling(allowed_updates=["message", "edited_message", "callback_query"])
 
     except Exception as e:
         logger.error(f"Failed to start bot: {e}")
