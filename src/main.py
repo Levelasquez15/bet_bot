@@ -9,6 +9,7 @@ from .command_handlers import (
     cmd_apuestas
 )
 from .config import get_telegram_token
+from .soccerdata_calendar_handlers import build_calendario_conversation
 
 # Configure logging
 logging.basicConfig(
@@ -46,6 +47,8 @@ def main() -> None:
         app.add_handler(CommandHandler("analyze_next", cmd_analyze_next))
         app.add_handler(CommandHandler("backtest", cmd_backtest))
         app.add_handler(CommandHandler("apuestas", cmd_apuestas))
+        # Calendario/fixtures basado en soccerdata (hoy/mañana + selector de mes/día)
+        app.add_handler(build_calendario_conversation())
         logger.info("All commands registered successfully")
 
         logger.info("🤖 BetBot iniciado. Esperando mensajes...")
