@@ -29,6 +29,11 @@ class LogicTreeAnalyzer:
             if gid in seen:
                 continue
 
+            # Filtro estricto: descartar si no tiene información de apuestas (no está en casas de apuestas)
+            has_odds = bool(game.get("odds")) or bool(game.get("bookmakers"))
+            if not has_odds:
+                continue
+
             home = game.get("homeCompetitor", {}).get("name", "Local")
             away = game.get("awayCompetitor", {}).get("name", "Visitante")
             match_name = f"{home} - {away}"
@@ -131,6 +136,11 @@ class LogicTreeAnalyzer:
             if gid in seen:
                 continue
 
+            # Filtro estricto: descartar si no tiene información de apuestas
+            has_odds = bool(game.get("odds")) or bool(game.get("bookmakers"))
+            if not has_odds:
+                continue
+
             home = game.get("homeCompetitor", {}).get("name", "Local")
             away = game.get("awayCompetitor", {}).get("name", "Visitante")
             match_name = f"{home} - {away}"
@@ -183,13 +193,14 @@ class LogicTreeAnalyzer:
     # ── Helpers ───────────────────────────────────────────────────────────────
 
     @staticmethod
-    def _make_pick(match, minute, market, reason, confidence) -> dict:
+    def _make_pick(match, minute, market, reason, confidence, odd="Validada ✅") -> dict:
         return {
             "match": match,
             "minute": minute,
             "market": market,
             "reason": reason,
-            "confidence": float(confidence)
+            "confidence": float(confidence),
+            "odd": odd
         }
 
     @staticmethod
