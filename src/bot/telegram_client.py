@@ -2,21 +2,41 @@ import logging
 import os
 from telegram import Update
 from telegram.ext import Application, CommandHandler, ContextTypes
+from src.bot.subscribers import add_subscriber, get_subscribers
 
 logger = logging.getLogger(__name__)
 
 async def start_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    """Envía un mensaje cuando se emite el comando /start."""
+    """Registra al usuario y le da la bienvenida."""
     user = update.effective_user
-    await update.message.reply_html(
-        rf"¡Hola {user.mention_html()}! Soy 365BetBot. 🤖"
-        "\n\nMe encuentro analizando partidos de 365scores en segundo plano."
-        "\nCuando detecte una apuesta de valor mediante mis árboles de decisión, te notificaré aquí."
-        "\n\nUsa /status para ver el estado del motor de recolección."
-    )
+    chat_id = update.effective_chat.id
+
+    is_new = add_subscriber(chat_id)
+
+    if is_new:
+        logger.info(f"Nuevo suscriptor registrado: {chat_id} ({user.full_name})")
+        await update.message.reply_html(
+            rf"¡Hola {user.mention_html()}! Soy 365BetBot. 🤖"
+            "\n\n✅ <b>Te has registrado con éxito.</b>"
+            "\nA partir de ahora recibirás alertas de apuestas de valor directamente aquí cuando detecte una señal en vivo."
+            "\n\nUsa /status para ver el estado del motor de recolección."
+        )
+    else:
+        await update.message.reply_html(
+            rf"¡Hola de nuevo {user.mention_html()}! 👋"
+            "\n\nYa estás registrado. Sigo analizando partidos en segundo plano."
+            "\nTe avisaré aquí cuando detecte una buena señal. 🎯"
+        )
 
 async def status_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    await update.message.reply_text("✅ Motor de Scraping: ACTIVO\n✅ Motor de Análisis: ACTIVO")
+    """Muestra el estado del bot y número de suscriptores."""
+    subs = get_subscribers()
+    await update.message.reply_text(
+        f"✅ Motor de Scraping: ACTIVO\n"
+        f"✅ Motor de Análisis: ACTIVO\n"
+        f"✅ Motor de Notificaciones: ACTIVO\n"
+        f"👥 Suscriptores activos: {len(subs)}"
+    )
 
 def create_application() -> Application:
     """Inicializa la aplicación y registra los comandos."""
@@ -27,7 +47,6 @@ def create_application() -> Application:
 
     app = Application.builder().token(token).build()
 
-    # Commands
     app.add_handler(CommandHandler("start", start_command))
     app.add_handler(CommandHandler("status", status_command))
 
