@@ -1,5 +1,6 @@
 import logging
 import httpx
+from datetime import datetime, timezone, timedelta
 from typing import Dict, Any, List
 
 logger = logging.getLogger(__name__)
@@ -13,69 +14,118 @@ DEFAULT_HEADERS = {
     "X-Requested-With": "XMLHttpRequest",
 }
 
-# Deportes a monitorear (1=Fútbol)
-SPORT_IDS = "1"
+# statusGroup codes de 365scores
+STATUS_UPCOMING  = 1
+STATUS_LIVE      = 2
+STATUS_HALF_TIME = 3
+STATUS_FINISHED  = 4
+
+BOGOTA_TZ = timezone(timedelta(hours=-5))
+
 
 class Scraper365:
-    """Motor de recolección de datos de 365scores."""
+    """Motor de recolección de datos de 365scores. Usa el endpoint /web/games/ (verificado)."""
+
+    BASE_URL = "https://webws.365scores.com/web/games/"
 
     def __init__(self):
-        self.base_url = "https://webws.365scores.com/web/games/current/"
         self.session = httpx.AsyncClient(
             headers=DEFAULT_HEADERS,
             timeout=20.0,
             follow_redirects=True
         )
 
-    async def fetch_live_matches(self) -> List[Dict[str, Any]]:
-        """Obtiene partidos EN VIVO en curso en este momento."""
+    def _today_str(self) -> str:
+        today = datetime.now(tz=BOGOTA_TZ)
+        return today.strftime("%d/%m/%Y")
+
+    def _base_params(self) -> dict:
+        return {
+            "appTypeId": "5",
+            "langId": "29",
+            "timezoneName": "America/Bogota",
+            "userCountryId": "170",
+            "sports": "1",
+            "showOdds": "true",
+            "startDate": self._today_str(),
+            "endDate": self._today_str(),
+        }
+
+    async def _fetch_games(self) -> List[Dict[str, Any]]:
+        """Fetches all games for today from the working 365scores endpoint."""
         try:
-            params = {
-                "appTypeId": "5",
-                "langId": "29",
-                "timezoneName": "America/Bogota",
-                "userCountryId": "170",
-                "sports": SPORT_IDS,
-                "showOdds": "true",
-            }
-
-            logger.info("Consultando partidos en vivo a 365scores...")
-            response = await self.session.get(self.base_url, params=params)
+            params = self._base_params()
+            logger.info(f"Consultando 365scores para {params['startDate']}...")
+            response = await self.session.get(self.BASE_URL, params=params)
             response.raise_for_status()
-
             data = response.json()
-            all_games = data.get("games", [])
-            logger.info(f"Total partidos recibidos: {len(all_games)}")
-
-            # Filtrar solo los que están EN VIVO (statusGroup 2 = en curso)
-            # statusGroup: 1=programado, 2=en juego, 3=finalizado, 4=cancelado
-            live_games = [
-                g for g in all_games
-                if g.get("statusGroup") == 2
-            ]
-
-            logger.info(f"Partidos en vivo (en juego): {len(live_games)}")
-
-            # Log de partidos para debugging
-            for g in live_games[:5]:
-                home = g.get("homeCompetitor", {}).get("name", "?")
-                away = g.get("awayCompetitor", {}).get("name", "?")
-                minute = g.get("gameTime", "?")
-                sh = g.get("homeCompetitor", {}).get("score", "?")
-                sa = g.get("awayCompetitor", {}).get("score", "?")
-                logger.info(f"  ⚽ {home} {sh} - {sa} {away} | min {minute}")
-
-            return live_games
-
-        except httpx.HTTPStatusError as e:
-            logger.error(f"Error HTTP {e.response.status_code} al consultar 365scores: {e}")
-            return []
+            games = data.get("games", [])
+            logger.info(f"Total partidos del día: {len(games)}")
+            return games
         except httpx.TimeoutException:
-            logger.error("Timeout al conectar con 365scores.")
+            logger.error("Timeout conectando a 365scores.")
+            return []
+        except httpx.HTTPStatusError as e:
+            logger.error(f"HTTP {e.response.status_code} en 365scores.")
             return []
         except Exception as e:
-            logger.error(f"Error inesperado en scraper_365: {e}")
+            logger.error(f"Error inesperado en fetch_games: {e}")
             return []
+
+    async def fetch_live_matches(self) -> List[Dict[str, Any]]:
+        """Partidos EN VIVO ahora mismo (en juego + medio tiempo)."""
+        games = await self._fetch_games()
+        live = [g for g in games if g.get("statusGroup") in (STATUS_LIVE, STATUS_HALF_TIME)]
+        logger.info(f"Partidos en vivo: {len(live)}")
+        return live
+
+    async def fetch_upcoming_matches(self, hours_ahead: int = 3) -> List[Dict[str, Any]]:
+        """Próximos partidos que empiezan en las siguientes N horas."""
+        games = await self._fetch_games()
+        now = datetime.now(tz=BOGOTA_TZ)
+        limit = now + timedelta(hours=hours_ahead)
+        upcoming = []
+        for g in games:
+            if g.get("statusGroup") != STATUS_UPCOMING:
+                continue
+            start_str = g.get("startTime", "")
+            try:
+                # 365scores devuelve formato ISO: "2026-04-07T18:00:00-05:00"
+                start_dt = datetime.fromisoformat(start_str)
+                if now <= start_dt <= limit:
+                    upcoming.append(g)
+            except Exception:
+                continue
+        logger.info(f"Próximos partidos (en {hours_ahead}h): {len(upcoming)}")
+        return upcoming
+
+    async def fetch_all_for_debug(self) -> dict:
+        """Para el comando /debug: estadísticas del scraper."""
+        games = await self._fetch_games()
+        groups = {1: 0, 2: 0, 3: 0, 4: 0}
+        for g in games:
+            sg = g.get("statusGroup", 0)
+            if sg in groups:
+                groups[sg] += 1
+
+        live_games = [g for g in games if g.get("statusGroup") in (STATUS_LIVE, STATUS_HALF_TIME)]
+        upcoming = await self.fetch_upcoming_matches(hours_ahead=3)
+
+        return {
+            "total": len(games),
+            "upcoming": groups[1],
+            "live": groups[2] + groups[3],
+            "finished": groups[4],
+            "upcoming_3h": len(upcoming),
+            "live_sample": [
+                f"{g.get('homeCompetitor',{}).get('name','?')} {g.get('homeCompetitor',{}).get('score','?')}-{g.get('awayCompetitor',{}).get('score','?')} {g.get('awayCompetitor',{}).get('name','?')} (min {g.get('gameTime','?')})"
+                for g in live_games[:5]
+            ],
+            "upcoming_sample": [
+                f"{g.get('homeCompetitor',{}).get('name','?')} vs {g.get('awayCompetitor',{}).get('name','?')} ({g.get('startTime','?')[:16]})"
+                for g in upcoming[:5]
+            ]
+        }
 
     async def close(self):
         await self.session.aclose()

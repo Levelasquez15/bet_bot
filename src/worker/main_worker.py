@@ -7,11 +7,14 @@ from src.bot.subscribers import get_subscribers
 
 logger = logging.getLogger(__name__)
 
-def format_pick_message(pick: dict) -> str:
-    """Formatea una señal al estilo Robot Millonario."""
-    stake = 4 if pick["confidence"] >= 80 else 3 if pick["confidence"] >= 70 else 2
+# Evita enviar la misma señal dos veces en el mismo ciclo
+_sent_picks: set = set()
 
-    msg = (
+
+def format_live_pick(pick: dict) -> str:
+    """Formato estilo Robot Millonario para partidos EN VIVO."""
+    stake = 4 if pick["confidence"] >= 80 else 3 if pick["confidence"] >= 73 else 2
+    return (
         f"🤖⚽🤖 <b>ROBOT APUESTA</b> ⚽🤖⚽\n\n"
         f"<b>{pick['match']}</b>\n\n"
         f"{pick['market']}\n\n"
@@ -20,62 +23,98 @@ def format_pick_message(pick: dict) -> str:
         f"💡 {pick['reason']}\n\n"
         f"STAKE {stake}"
     )
-    return msg
+
+
+def format_upcoming_pick(pick: dict) -> str:
+    """Formato para partidos PRÓXIMOS."""
+    stake = 3 if pick["confidence"] >= 78 else 2
+    return (
+        f"📅⚽ <b>ANÁLISIS PRE-PARTIDO</b> ⚽📅\n\n"
+        f"<b>{pick['match']}</b>\n"
+        f"🕐 Inicio: {pick['minute']}\n\n"
+        f"{pick['market']}\n\n"
+        f"📊 <b>PROBABILIDAD</b> 📊 👉 {pick['confidence']}%\n"
+        f"💡 {pick['reason']}\n\n"
+        f"STAKE {stake}"
+    )
+
+
+async def _broadcast(context, picks: list, formatter) -> None:
+    """Envía picks a todos los suscriptores evitando duplicados."""
+    global _sent_picks
+    subscribers = get_subscribers()
+
+    if not subscribers:
+        logger.warning(f"{len(picks)} señal(es) detectada(s) pero sin suscriptores.")
+        return
+
+    for pick in picks:
+        pick_key = f"{pick['match']}|{pick['market']}"
+        if pick_key in _sent_picks:
+            logger.info(f"Señal duplicada ignorada: {pick_key}")
+            continue
+
+        msg = formatter(pick)
+        sent_to = 0
+        for chat_id in subscribers:
+            try:
+                await context.bot.send_message(
+                    chat_id=chat_id,
+                    text=msg,
+                    parse_mode="HTML"
+                )
+                sent_to += 1
+            except Exception as e:
+                logger.error(f"Error enviando a {chat_id}: {e}")
+
+        if sent_to > 0:
+            _sent_picks.add(pick_key)
+            logger.info(f"✅ Señal enviada a {sent_to} usuario(s): {pick['match']} → {pick['market']}")
+
+    # Limpiar el historial cada 500 picks para no crecer indefinidamente
+    if len(_sent_picks) > 500:
+        _sent_picks.clear()
+
 
 async def scraping_job(context: ContextTypes.DEFAULT_TYPE) -> None:
     """
-    Tarea de fondo: raspa 365scores, analiza con árbol de decisiones
-    y manda notificación a todos los suscriptores si hay valor.
+    Tarea de fondo principal. Corre cada 2 minutos.
+    1. Analiza partidos EN VIVO con árboles de decisión
+    2. Analiza PRÓXIMOS partidos con modelo Poisson
+    3. Envía notificaciones a todos los suscriptores
     """
-    logger.info("Iniciando ciclo de escaneo de 365scores...")
+    logger.info("━━━ Ciclo de escaneo iniciado ━━━")
     scraper = Scraper365()
     analyzer = LogicTreeAnalyzer()
 
     try:
-        # 1. Extraer partidos en vivo
+        # ── En Vivo ────────────────────────────────────────────────────────
         live_games = await scraper.fetch_live_matches()
-        if not live_games:
-            logger.info("No hay partidos en curso o no se pudo extraer datos.")
-            return
+        if live_games:
+            live_picks = analyzer.analyze_live(live_games)
+            if live_picks:
+                await _broadcast(context, live_picks, format_live_pick)
+        else:
+            logger.info("Sin partidos en vivo en este ciclo.")
 
-        # 2. Analizar con Árbol de Decisiones
-        picks = analyzer.analyze_games(live_games)
-
-        if not picks:
-            logger.info("Escaneo terminado. No se detectaron apuestas de valor.")
-            return
-
-        # 3. Notificar a todos los suscriptores
-        subscribers = get_subscribers()
-        if not subscribers:
-            logger.warning("Hay señales pero no hay suscriptores registrados. Nadie recibirá notificaciones.")
-            logger.info(f"Señales detectadas: {[p['market'] for p in picks]}")
-            return
-
-        logger.info(f"Se detectaron {len(picks)} señal(es). Enviando a {len(subscribers)} suscriptor(es)...")
-
-        for pick in picks:
-            msg = format_pick_message(pick)
-            logger.info(f"Señal: {pick['match']} → {pick['market']}")
-
-            for chat_id in subscribers:
-                try:
-                    await context.bot.send_message(
-                        chat_id=chat_id,
-                        text=msg,
-                        parse_mode="HTML"
-                    )
-                except Exception as e:
-                    logger.error(f"Error enviando a chat_id {chat_id}: {e}")
+        # ── Próximos (siguientes 3 horas) ──────────────────────────────────
+        upcoming_games = await scraper.fetch_upcoming_matches(hours_ahead=3)
+        if upcoming_games:
+            upcoming_picks = analyzer.analyze_upcoming(upcoming_games)
+            if upcoming_picks:
+                await _broadcast(context, upcoming_picks, format_upcoming_pick)
+        else:
+            logger.info("Sin partidos próximos en las siguientes 3h.")
 
     except Exception as e:
-        logger.error(f"Error en el ciclo de escaneo: {e}")
+        logger.error(f"Error crítico en scraping_job: {e}", exc_info=True)
     finally:
         await scraper.close()
+        logger.info("━━━ Ciclo de escaneo completado ━━━")
+
 
 def setup_worker(app) -> None:
-    """Configura el loop asíncrono que corre de fondo."""
+    """Registra el job recurrente en el scheduler de PTB."""
     job_queue = app.job_queue
-    # Intervalo de 2 minutos (120 seg) - evita límites de API
-    job_queue.run_repeating(scraping_job, interval=120, first=10)
-    logger.info("Worker configurado: Scraping → Analyzer → Telegram (todos los suscriptores).")
+    job_queue.run_repeating(scraping_job, interval=120, first=15)
+    logger.info("⚙️  Worker registrado: ciclo de 2 min (Live + Próximos).")
