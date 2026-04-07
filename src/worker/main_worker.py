@@ -3,7 +3,7 @@ import os
 from telegram.ext import ContextTypes
 from src.scraper.scraper_365 import Scraper365
 from src.analyzer.logic_tree import LogicTreeAnalyzer
-from src.bot.subscribers import get_subscribers
+from src.bot.subscribers import add_subscriber, get_active_subscribers
 from src.bot.pick_tracker import record_pick
 from src.worker.result_checker import setup_result_checker
 
@@ -43,7 +43,7 @@ def format_upcoming_pick(pick: dict) -> str:
 async def _broadcast(context, picks: list, formatter, game_map: dict, pick_type: str) -> None:
     """Envía picks a todos los suscriptores y los registra en el tracker."""
     global _sent_picks
-    subscribers = get_subscribers()
+    subscribers = get_active_subscribers()
 
     if not subscribers:
         logger.warning(f"{len(picks)} señal(es) sin suscriptores para enviar.")

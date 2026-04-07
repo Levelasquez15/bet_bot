@@ -39,6 +39,10 @@ class Scraper365:
         today = datetime.now(tz=BOGOTA_TZ)
         return today.strftime("%d/%m/%Y")
 
+    def _tomorrow_str(self) -> str:
+        tomorrow = datetime.now(tz=BOGOTA_TZ) + timedelta(days=1)
+        return tomorrow.strftime("%d/%m/%Y")
+
     def _base_params(self) -> dict:
         return {
             "appTypeId": "5",
@@ -48,7 +52,7 @@ class Scraper365:
             "sports": "1",
             "showOdds": "true",
             "startDate": self._today_str(),
-            "endDate": self._today_str(),
+            "endDate": self._tomorrow_str(),
         }
 
     async def _fetch_games(self) -> List[Dict[str, Any]]:

@@ -2,7 +2,7 @@ import logging
 import os
 from telegram import Update
 from telegram.ext import Application, CommandHandler, ContextTypes
-from src.bot.subscribers import add_subscriber, get_subscribers
+from src.bot.subscribers import add_subscriber, get_subscribers, set_paused
 from src.bot.pick_tracker import get_stats, get_recent_picks
 from src.scraper.scraper_365 import Scraper365
 
@@ -31,10 +31,12 @@ async def start_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> N
             "\n  • 8 árboles de decisión (live)"
             "\n  • Modelo Poisson (pre-partido)"
             "\n  • Verificación automática de resultados"
-            "\n\n<b>Comandos disponibles:</b>"
+            "\n<b>Comandos disponibles:</b>"
             "\n/status — Estado del motor"
             "\n/historial — Últimos 10 picks enviados"
             "\n/stats — Tu tasa de acierto"
+            "\n/pause — Pausa las notificaciones"
+            "\n/resume — Reactiva las notificaciones"
             "\n/debug — Datos en tiempo real del scraper"
         )
     else:
@@ -43,6 +45,7 @@ async def start_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> N
             "\n\nYa estás registrado. Sigo analizando cada 2 minutos. 🔄"
             "\nUsa /historial o /stats para ver el rendimiento del bot. 🎯"
         )
+    set_paused(chat_id, False)
 
 
 async def status_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -137,6 +140,43 @@ async def debug_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> N
         await scraper.close()
 
 
+async def pause_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    chat_id = update.effective_chat.id
+    set_paused(chat_id, True)
+    await update.message.reply_html("🔇 <b>Bot Pausado.</b>\nYa no recibirás alertas de apuestas. Usa /resume para reactivar.")
+
+async def resume_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    chat_id = update.effective_chat.id
+    set_paused(chat_id, False)
+    await update.message.reply_html("🔊 <b>Bot Reactivado.</b>\nVuelves a estar en la lista prioritaria para recibir picks.")
+
+async def debugodds_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    await update.message.reply_text("🔍 Extrayendo el JSON de un partido con cuotas para análisis... un momento.")
+    scraper = Scraper365()
+    try:
+        games = await scraper.fetch_live_matches()
+        game_con_cuotas = next((g for g in games if "odds" in g or "bookmakers" in g), None)
+        if game_con_cuotas:
+            import json
+            bookmakers = game_con_cuotas.get("bookmakers", [])
+            odds = game_con_cuotas.get("odds", {})
+            report = {
+                "match": f"{game_con_cuotas.get('homeCompetitor', {}).get('name')} vs {game_con_cuotas.get('awayCompetitor', {}).get('name')}",
+                "odds_key": odds,
+                "bookmakers_key": bookmakers
+            }
+            json_text = json.dumps(report, ensure_ascii=False, indent=2)
+            # Limpiar longitud
+            if len(json_text) > 3000:
+                json_text = json_text[:3000] + "\n...[TRUNCATED]"
+            await update.message.reply_html(f"<b>RAW JSON (Cuotas):</b>\n<pre>{json_text}</pre>")
+        else:
+            await update.message.reply_text("❌ No encontré ningún partido en vivo con nodo 'odds' o 'bookmakers' en este instante.")
+    except Exception as e:
+        await update.message.reply_text(f"❌ Error en debugodds: {e}")
+    finally:
+        await scraper.close()
+
 def create_application() -> Application:
     token = os.getenv("TELEGRAM_TOKEN")
     if not token:
@@ -147,6 +187,9 @@ def create_application() -> Application:
     app.add_handler(CommandHandler("status",    status_command))
     app.add_handler(CommandHandler("historial", historial_command))
     app.add_handler(CommandHandler("stats",     stats_command))
+    app.add_handler(CommandHandler("pause",     pause_command))
+    app.add_handler(CommandHandler("resume",    resume_command))
     app.add_handler(CommandHandler("debug",     debug_command))
+    app.add_handler(CommandHandler("debugodds", debugodds_command))
 
     return app

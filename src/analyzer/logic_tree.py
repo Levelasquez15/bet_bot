@@ -40,6 +40,10 @@ class LogicTreeAnalyzer:
             sh = self._safe_int(game.get("homeCompetitor", {}).get("score", 0))
             sa = self._safe_int(game.get("awayCompetitor", {}).get("score", 0))
             minute = self._safe_int(game.get("gameTime", 0))
+
+            if minute < 0:
+                continue
+
             total_goles = sh + sa
             diff = abs(sh - sa)
             is_half_time = game.get("statusGroup") == 3

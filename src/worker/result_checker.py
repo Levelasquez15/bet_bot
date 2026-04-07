@@ -8,7 +8,7 @@ from src.scraper.scraper_365 import Scraper365
 from src.bot.pick_tracker import (
     get_pending_picks, update_pick_result, verify_pick
 )
-from src.bot.subscribers import get_subscribers
+from src.bot.subscribers import get_active_subscribers
 
 logger = logging.getLogger(__name__)
 
@@ -40,7 +40,7 @@ async def result_check_job(context: ContextTypes.DEFAULT_TYPE) -> None:
             if g.get("statusGroup") == 4  # 4 = finalizado
         }
 
-        subscribers = get_subscribers()
+        subscribers = get_active_subscribers()
 
         for pick in pending:
             game_id = pick.get("game_id", "")
