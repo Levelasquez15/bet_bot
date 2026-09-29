@@ -9,7 +9,8 @@ RUN apt-get update && apt-get install -y \
     && rm -rf /var/lib/apt/lists/*
 
 ENV PYTHONDONTWRITEBYTECODE=1 \
-    PYTHONUNBUFFERED=1
+    PYTHONUNBUFFERED=1 \
+    PORT=8000
 
 WORKDIR /app
 
@@ -18,5 +19,7 @@ RUN pip install --no-cache-dir -r requirements.txt
 
 COPY src ./src
 COPY telegram_bot.py ./telegram_bot.py
+
+EXPOSE 8000
 
 CMD ["python", "telegram_bot.py"]

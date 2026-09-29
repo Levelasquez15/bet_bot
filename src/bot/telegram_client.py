@@ -178,9 +178,9 @@ async def debugodds_command(update: Update, context: ContextTypes.DEFAULT_TYPE) 
         await scraper.close()
 
 def create_application() -> Application:
-    token = os.getenv("TELEGRAM_TOKEN")
+    token = os.getenv("TELEGRAM_TOKEN") or os.getenv("TELEGRAM_BOT_TOKEN")
     if not token:
-        raise ValueError("No se encontró TELEGRAM_TOKEN en el entorno.")
+        raise ValueError("No se encontró TELEGRAM_TOKEN ni TELEGRAM_BOT_TOKEN en el entorno.")
 
     app = Application.builder().token(token).build()
     app.add_handler(CommandHandler("start",     start_command))
