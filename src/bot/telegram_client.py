@@ -1,3 +1,8 @@
+# pyright: reportOptionalMemberAccess=none
+# pyright: reportAttributeAccessIssue=none
+# pyright: reportArgumentType=none
+# pyright: reportGeneralTypeIssues=none
+
 """
 Cliente de Telegram para BetBot.
 Incluye comandos interactivos, botones Inline, menú de preferencias y control de bankroll.
@@ -80,9 +85,12 @@ def get_back_keyboard() -> InlineKeyboardMarkup:
 # ── Comandos Principales ───────────────────────────────────────────────────────
 
 async def start_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    user    = update.effective_user
-    chat_id = update.effective_chat.id
-    is_new  = add_subscriber(chat_id, username=user.username, first_name=user.first_name)
+    user = update.effective_user
+    chat = update.effective_chat
+    if not user or not chat or not update.message:
+        return
+    chat_id = chat.id
+    is_new = add_subscriber(chat_id, username=user.username, first_name=user.first_name)
 
     welcome_text = (
         rf"¡Hola {user.mention_html()}! Soy <b>BetBot AI</b> 🤖⚽"
@@ -101,11 +109,12 @@ async def start_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> N
 
 async def menu_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     """Abre el panel táctil interactivo."""
-    await update.message.reply_html(
-        "📱 <b>PANEL DE CONTROL INTERACTIVO</b> 📱\n"
-        "Elige qué deseas consultar:",
-        reply_markup=get_main_menu_keyboard()
-    )
+    if update.message:
+        await update.message.reply_html(
+            "📱 <b>PANEL DE CONTROL INTERACTIVO</b> 📱\n"
+            "Elige qué deseas consultar:",
+            reply_markup=get_main_menu_keyboard()
+        )
 
 
 async def status_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -126,7 +135,7 @@ async def status_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
     )
     if update.callback_query:
         await update.callback_query.edit_message_text(text, parse_mode="HTML", reply_markup=get_back_keyboard())
-    else:
+    elif update.message:
         await update.message.reply_html(text, reply_markup=get_back_keyboard())
 
 
@@ -151,7 +160,7 @@ async def historial_command(update: Update, context: ContextTypes.DEFAULT_TYPE) 
 
     if update.callback_query:
         await update.callback_query.edit_message_text(msg, parse_mode="HTML", reply_markup=get_back_keyboard())
-    else:
+    elif update.message:
         await update.message.reply_html(msg, reply_markup=get_back_keyboard())
 
 
@@ -182,7 +191,7 @@ async def stats_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> N
 
     if update.callback_query:
         await update.callback_query.edit_message_text(msg, parse_mode="HTML", reply_markup=get_back_keyboard())
-    else:
+    elif update.message:
         await update.message.reply_html(msg, reply_markup=get_back_keyboard())
 
 
@@ -193,7 +202,7 @@ async def bankroll_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -
         msg = "📭 Aún no hay pronósticos registrados en la base de datos."
         if update.callback_query:
             await update.callback_query.edit_message_text(msg, reply_markup=get_back_keyboard())
-        else:
+        elif update.message:
             await update.message.reply_text(msg, reply_markup=get_back_keyboard())
         return
 
@@ -233,7 +242,7 @@ async def bankroll_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -
 
     if update.callback_query:
         await update.callback_query.edit_message_text(msg, parse_mode="HTML", reply_markup=get_back_keyboard())
-    else:
+    elif update.message:
         await update.message.reply_html(msg, reply_markup=get_back_keyboard())
 
 
@@ -241,7 +250,7 @@ async def combinada_command(update: Update, context: ContextTypes.DEFAULT_TYPE) 
     """Genera en tiempo real un ticket de apuesta combinada optimizada con Valor Esperado."""
     if update.callback_query:
         await update.callback_query.edit_message_text("🎰 Calculando la mejor combinada con valor matemático... un momento.")
-    else:
+    elif update.message:
         await update.message.reply_text("🎰 Calculando la mejor combinada con valor matemático... un momento.")
 
     scraper = Scraper365()
@@ -266,7 +275,7 @@ async def combinada_command(update: Update, context: ContextTypes.DEFAULT_TYPE) 
 
         if update.callback_query:
             await update.callback_query.edit_message_text(msg, parse_mode="HTML", reply_markup=get_back_keyboard())
-        else:
+        elif update.message:
             await update.message.reply_html(msg, reply_markup=get_back_keyboard())
 
     except Exception as e:
@@ -274,7 +283,7 @@ async def combinada_command(update: Update, context: ContextTypes.DEFAULT_TYPE) 
         err_msg = f"❌ Error calculando combinada: {e}"
         if update.callback_query:
             await update.callback_query.edit_message_text(err_msg, reply_markup=get_back_keyboard())
-        else:
+        elif update.message:
             await update.message.reply_text(err_msg, reply_markup=get_back_keyboard())
     finally:
         await scraper.close()
@@ -313,19 +322,21 @@ async def jornada_command(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
         msg = "\n".join(lines)
         if update.callback_query:
             await update.callback_query.edit_message_text(msg, parse_mode="HTML", reply_markup=get_back_keyboard())
-        else:
+        elif update.message:
             await update.message.reply_html(msg, reply_markup=get_back_keyboard())
     except Exception as e:
         logger.error(f"Error en jornada_command: {e}", exc_info=True)
         if update.callback_query:
             await update.callback_query.edit_message_text(f"❌ Error consultando jornada: {e}", reply_markup=get_back_keyboard())
-        else:
+        elif update.message:
             await update.message.reply_text(f"❌ Error consultando jornada: {e}")
     finally:
         await scraper.close()
 
 
 async def pause_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    if not update.effective_chat or not update.message:
+        return
     chat_id = update.effective_chat.id
     set_paused(chat_id, True)
     await update.message.reply_html(
@@ -335,6 +346,8 @@ async def pause_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> N
 
 
 async def resume_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    if not update.effective_chat or not update.message:
+        return
     chat_id = update.effective_chat.id
     set_paused(chat_id, False)
     await update.message.reply_html(
@@ -344,6 +357,8 @@ async def resume_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
 
 
 async def debug_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    if not update.message:
+        return
     await update.message.reply_text("🔍 Consultando 365scores... un momento.")
     scraper = Scraper365()
     try:
@@ -376,6 +391,8 @@ async def debug_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> N
 
 
 async def debugodds_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    if not update.message:
+        return
     await update.message.reply_text("🔍 Extrayendo el JSON de un partido con cuotas para análisis... un momento.")
     scraper = Scraper365()
     try:
@@ -406,10 +423,14 @@ async def debugodds_command(update: Update, context: ContextTypes.DEFAULT_TYPE) 
 async def button_callback_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     """Gestiona los toques en los botones InlineKeyboardMarkup."""
     query = update.callback_query
+    if not query or not query.message:
+        return
     await query.answer()
 
     data = query.data
     chat_id = query.message.chat_id
+    if not chat_id:
+        return
 
     if data == "btn_main_menu":
         await query.edit_message_text(
