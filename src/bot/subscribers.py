@@ -4,7 +4,7 @@ Mantiene compatibilidad total con la API existente.
 """
 
 import logging
-from typing import Set
+from typing import Set, Optional
 from src.db.repositories import SubscriberRepository, migrate_json_to_db
 
 logger = logging.getLogger(__name__)
@@ -16,7 +16,7 @@ except Exception as e:
     logger.debug(f"Migración inicial JSON: {e}")
 
 
-def add_subscriber(chat_id: int, username: str = None, first_name: str = None) -> bool:
+def add_subscriber(chat_id: int, username: Optional[str] = None, first_name: Optional[str] = None) -> bool:
     """Agrega un chat_id a la base de datos. Retorna True si era nuevo, False si ya existía."""
     return SubscriberRepository.add_subscriber(chat_id, username=username, first_name=first_name)
 

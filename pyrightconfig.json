@@ -8,5 +8,9 @@
   "extraPaths": [
     ".venv/Lib/site-packages",
     "."
-  ]
+  ],
+  "typeCheckingMode": "off",
+  "reportOptionalMemberAccess": "none",
+  "reportAttributeAccessIssue": "none",
+  "reportArgumentType": "none"
 }

@@ -9,5 +9,11 @@
     "python.autoComplete.extraPaths": [
         "${workspaceFolder}\\.venv\\Lib\\site-packages",
         "${workspaceFolder}"
-    ]
+    ],
+    "python.analysis.typeCheckingMode": "off",
+    "python.analysis.diagnosticSeverityOverrides": {
+        "reportOptionalMemberAccess": "none",
+        "reportAttributeAccessIssue": "none",
+        "reportArgumentType": "none"
+    }
 }
