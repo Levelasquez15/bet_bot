@@ -1,7 +1,8 @@
 import logging
 import httpx
 from datetime import datetime, timezone, timedelta
-from typing import Dict, Any, List
+from typing import Dict, Any, List, Optional
+from src.scraper.leagues import classify_competition, is_valid_match
 
 logger = logging.getLogger(__name__)
 
@@ -23,15 +24,61 @@ STATUS_FINISHED  = 4
 BOGOTA_TZ = timezone(timedelta(hours=-5))
 
 
+def extract_match_odds(game: dict) -> Dict[str, Any]:
+    """
+    Extrae y normaliza las cuotas decimales del nodo de 365scores.
+    Retorna cuotas 1X2 (Home, Draw, Away) y disponibilidad.
+    """
+    odds_node = game.get("odds")
+    result = {
+        "has_odds": False,
+        "home": None,
+        "draw": None,
+        "away": None,
+        "bookmaker": "365Scores"
+    }
+
+    if not isinstance(odds_node, dict):
+        return result
+
+    options = odds_node.get("options", [])
+    if not options or not isinstance(options, list):
+        return result
+
+    for opt in options:
+        name = str(opt.get("name", "")).strip().upper()
+        rate_dict = opt.get("rate", {})
+        try:
+            decimal_rate = float(rate_dict.get("decimal", 0))
+        except (TypeError, ValueError):
+            decimal_rate = 0.0
+
+        if decimal_rate > 1.0:
+            if name == "1":
+                result["home"] = decimal_rate
+            elif name in ("X", "EMPATE", "DRAW"):
+                result["draw"] = decimal_rate
+            elif name == "2":
+                result["away"] = decimal_rate
+
+    if result["home"] or result["draw"] or result["away"]:
+        result["has_odds"] = True
+
+    return result
+
+
 class Scraper365:
-    """Motor de recolección de datos de 365scores. Usa el endpoint /web/games/ (verificado)."""
+    """Motor robusto de recolección de datos en tiempo real de 365scores."""
 
     BASE_URL = "https://webws.365scores.com/web/games/"
 
-    def __init__(self):
+    def __init__(self, timeout: float = 30.0):
+        # Transport con reintentos automáticos para evitar microcortes de red
+        transport = httpx.AsyncHTTPTransport(retries=3)
         self.session = httpx.AsyncClient(
+            transport=transport,
             headers=DEFAULT_HEADERS,
-            timeout=20.0,
+            timeout=timeout,
             follow_redirects=True
         )
 
@@ -43,7 +90,7 @@ class Scraper365:
         tomorrow = datetime.now(tz=BOGOTA_TZ) + timedelta(days=1)
         return tomorrow.strftime("%d/%m/%Y")
 
-    def _base_params(self) -> dict:
+    def _base_params(self, include_tomorrow: bool = False) -> dict:
         return {
             "appTypeId": "5",
             "langId": "29",
@@ -52,22 +99,20 @@ class Scraper365:
             "sports": "1",
             "showOdds": "true",
             "startDate": self._today_str(),
-            "endDate": self._tomorrow_str(),
+            "endDate": self._tomorrow_str() if include_tomorrow else self._today_str(),
         }
 
-    async def _fetch_games(self) -> List[Dict[str, Any]]:
-        """Fetches all games for today from the working 365scores endpoint."""
+    async def _fetch_games(self, include_tomorrow: bool = False) -> List[Dict[str, Any]]:
+        """Consulta los partidos crudos desde la API web de 365scores."""
         try:
-            params = self._base_params()
-            logger.info(f"Consultando 365scores para {params['startDate']}...")
+            params = self._base_params(include_tomorrow=include_tomorrow)
             response = await self.session.get(self.BASE_URL, params=params)
             response.raise_for_status()
             data = response.json()
             games = data.get("games", [])
-            logger.info(f"Total partidos del día: {len(games)}")
             return games
         except httpx.TimeoutException:
-            logger.error("Timeout conectando a 365scores.")
+            logger.error("Timeout conectando a 365scores (se agotó el tiempo de espera).")
             return []
         except httpx.HTTPStatusError as e:
             logger.error(f"HTTP {e.response.status_code} en 365scores.")
@@ -76,60 +121,80 @@ class Scraper365:
             logger.error(f"Error inesperado en fetch_games: {e}")
             return []
 
-    async def fetch_live_matches(self) -> List[Dict[str, Any]]:
-        """Partidos EN VIVO ahora mismo (en juego + medio tiempo)."""
-        games = await self._fetch_games()
-        live = [g for g in games if g.get("statusGroup") in (STATUS_LIVE, STATUS_HALF_TIME)]
-        logger.info(f"Partidos en vivo: {len(live)}")
+    async def fetch_live_matches(self, filter_leagues: bool = True, min_tier: int = 3) -> List[Dict[str, Any]]:
+        """
+        Devuelve partidos EN VIVO (en juego + medio tiempo),
+        enriquecidos con cuotas y filtrados por relevancia de liga.
+        """
+        games = await self._fetch_games(include_tomorrow=False)
+        live = []
+
+        for g in games:
+            # Solo partidos en juego o medio tiempo
+            if g.get("statusGroup") not in (STATUS_LIVE, STATUS_HALF_TIME):
+                continue
+
+            # Filtro inteligente de ligas (ignorar juveniles, 7ª división, amateurs)
+            if filter_leagues and not is_valid_match(g, min_tier=min_tier):
+                continue
+
+            # Enriquecer con cuotas normalizadas
+            g["parsed_odds"] = extract_match_odds(g)
+            live.append(g)
+
+        logger.info(f"Partidos en vivo detectados (filtrados): {len(live)}")
         return live
 
-    async def fetch_upcoming_matches(self, hours_ahead: int = 3) -> List[Dict[str, Any]]:
-        """Próximos partidos que empiezan en las siguientes N horas."""
-        games = await self._fetch_games()
+    async def fetch_upcoming_matches(self, hours_ahead: int = 4, filter_leagues: bool = True, min_tier: int = 3) -> List[Dict[str, Any]]:
+        """
+        Próximos partidos programados para las siguientes N horas,
+        filtrados por calidad de liga y con cuotas extraídas.
+        """
+        games = await self._fetch_games(include_tomorrow=True)
         now = datetime.now(tz=BOGOTA_TZ)
         limit = now + timedelta(hours=hours_ahead)
         upcoming = []
+
         for g in games:
             if g.get("statusGroup") != STATUS_UPCOMING:
                 continue
+
+            # Filtro inteligente de ligas
+            if filter_leagues and not is_valid_match(g, min_tier=min_tier):
+                continue
+
             start_str = g.get("startTime", "")
             try:
-                # 365scores devuelve formato ISO: "2026-04-07T18:00:00-05:00"
                 start_dt = datetime.fromisoformat(start_str)
                 if now <= start_dt <= limit:
+                    g["parsed_odds"] = extract_match_odds(g)
                     upcoming.append(g)
             except Exception:
                 continue
-        logger.info(f"Próximos partidos (en {hours_ahead}h): {len(upcoming)}")
+
+        logger.info(f"Próximos partidos en las próximas {hours_ahead}h: {len(upcoming)}")
         return upcoming
 
     async def fetch_all_for_debug(self) -> dict:
-        """Para el comando /debug: estadísticas del scraper."""
-        games = await self._fetch_games()
-        groups = {1: 0, 2: 0, 3: 0, 4: 0}
-        for g in games:
-            sg = g.get("statusGroup", 0)
-            if sg in groups:
-                groups[sg] += 1
-
-        live_games = [g for g in games if g.get("statusGroup") in (STATUS_LIVE, STATUS_HALF_TIME)]
-        upcoming = await self.fetch_upcoming_matches(hours_ahead=3)
+        """Devuelve diagnóstico completo del estado del scraper y datos en tiempo real."""
+        games = await self._fetch_games(include_tomorrow=True)
+        live_games = await self.fetch_live_matches(filter_leagues=True)
+        upcoming = await self.fetch_upcoming_matches(hours_ahead=4, filter_leagues=True)
 
         return {
-            "total": len(games),
-            "upcoming": groups[1],
-            "live": groups[2] + groups[3],
-            "finished": groups[4],
-            "upcoming_3h": len(upcoming),
+            "total_raw": len(games),
+            "live_filtered": len(live_games),
+            "upcoming_filtered": len(upcoming),
             "live_sample": [
-                f"{g.get('homeCompetitor',{}).get('name','?')} {g.get('homeCompetitor',{}).get('score','?')}-{g.get('awayCompetitor',{}).get('score','?')} {g.get('awayCompetitor',{}).get('name','?')} (min {g.get('gameTime','?')})"
+                f"{g.get('homeCompetitor',{}).get('name','?')} {g.get('homeCompetitor',{}).get('score',0)}-{g.get('awayCompetitor',{}).get('score',0)} {g.get('awayCompetitor',{}).get('name','?')} (min {int(float(g.get('gameTime',0)))}) [{g.get('competitionDisplayName')}]"
                 for g in live_games[:5]
             ],
             "upcoming_sample": [
-                f"{g.get('homeCompetitor',{}).get('name','?')} vs {g.get('awayCompetitor',{}).get('name','?')} ({g.get('startTime','?')[:16]})"
+                f"{g.get('homeCompetitor',{}).get('name','?')} vs {g.get('awayCompetitor',{}).get('name','?')} ({g.get('startTime','')[:16]}) [{g.get('competitionDisplayName')}]"
                 for g in upcoming[:5]
             ]
         }
 
     async def close(self):
+        """Cierra la sesión HTTP."""
         await self.session.aclose()

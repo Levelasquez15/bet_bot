@@ -1,294 +1,92 @@
-# BetBot - Telegram Bot for Football Predictions
+# 🤖 BetBot - AI & Statistical Football Predictions Engine
 
-Sistema avanzado de predicción de fútbol usando modelos matemáticos (Poisson + Elo) integrado con soccerdata para datos en tiempo real.
+Motor inteligente de pronósticos deportivos en tiempo real para fútbol, combinando modelos matemáticos (Poisson, Elo, Value Betting), árboles de decisión heurísticos y recolección de datos de alta velocidad con 365scores, integrado con un Bot de Telegram interactivo.
 
-## 🚀 Características principales
+---
 
-### 📅 Calendario y Fixtures
-- **Obtención automática** de partidos usando **soccerdata** (FBref)
-- **Selección por fecha**: Hoy, mañana, o fecha específica
-- **Ligas top**: Big 5 European Leagues (Premier League, La Liga, Serie A, Bundesliga, Ligue 1)
-- **Interfaz intuitiva** con botones inline de Telegram
+## 📋 Roadmap Modular y Estado del Proyecto
 
-### 🎯 Análisis de partidos
-- **Modelo Poisson** para distribución de goles
-- **Sistema Elo** para rating de equipos
-- **Estadísticas avanzadas** de soccerdata (xG, forma reciente, head-to-head)
-- **Múltiples tipos de apuesta**: 1X2, Over/Under 2.5, BTTS, etc.
+> **Convención:**
+> * `[x]` **Completado (con chulo):** Funcionalidad desarrollada, testeada y operativa.
+> * `[ ]` **Pendiente:** Funcionalidad planificada para ser desarrollada en su módulo correspondiente.
 
-### 💡 Recomendaciones inteligentes
-- **Probabilidades calculadas** con alta precisión
-- **Recomendaciones automáticas** basadas en umbrales de confianza
-- **Explicación transparente** del razonamiento
-- **Combinadas automáticas** con mejor value
+### 🔹 Módulo 1: Ingestión de Datos y Scraping (`src/scraper/`)
+- [x] Conexión asíncrona a la API web de 365scores con `httpx`
+- [x] Detección de partidos del día y partidos de mañana
+- [x] Separación de partidos en vivo (`statusGroup 2 y 3`) y próximos (`statusGroup 1`)
+- [x] Manejo de zona horaria local (Bogotá UTC-5)
+- [x] Conexión resiliente con reintentos automáticos (`AsyncHTTPTransport` retries=3)
+- [x] Filtro y categorización por Ligas Top (`src/scraper/leagues.py`)
+- [x] Descarte inteligente de partidos juveniles (Sub-17/19), reservas y ligas amateurs
+- [x] Extracción y normalización robusta de cuotas 1X2 desde 365scores
+- [ ] Extracción de estadísticas en vivo avanzadas adicionales (tiros a puerta, posesión, córners)
 
-### 🤖 Bot de Telegram
-- **Comandos principales**:
-  - `/calendario` - Ver y seleccionar partidos por fecha
-  - `/jornada` - Análisis rápido de jornada
-  - `/combinada` - Generar apuestas combinadas
-- **Modos de análisis**: Automático (todos los partidos) o Manual (selección personalizada)
-- **Respuestas formateadas** con emojis y HTML
+### 🔹 Módulo 2: Motor Matemático y Análisis Predictivo (`src/analyzer/`, `src/models/`)
+- [x] Árboles de decisión heurísticos básicos para partidos en vivo
+- [x] Estimación básica de distribución de goles con Poisson
+- [ ] Integración real del sistema Elo con cálculo de ventaja local/visitante
+- [ ] Cálculo de Valor Esperado ($EV > 0$ / Value Betting): Probabilidad del modelo vs Cuota real
+- [ ] Filtro de confianza configurable por umbrales matemáticos
+- [ ] Algoritmo generador de apuestas combinadas (Parlays de 2-3 selecciones con mejor value)
 
-## 🛠️ Tecnologías utilizadas
+### 🔹 Módulo 3: Base de Datos y Persistencia (`src/db/`)
+- [x] Almacenamiento básico en archivos JSON planos (`subscribers.json`, `picks_history.json`)
+- [ ] Migración de archivos JSON a SQLite local / Supabase (PostgreSQL)
+- [ ] Esquema relacional: tablas de `subscribers`, `picks`, `matches`, `bankroll`
+- [ ] Operaciones transaccionales seguras sin riesgo de bloqueo o corrupción de archivos
 
-- **Python 3.12+**
-- **soccerdata 1.8.8** - Para datos de fútbol de FBref
-- **python-telegram-bot 21.6** - Framework del bot
-- **pandas & numpy** - Manipulación de datos
-- **scipy** - Distribuciones estadísticas
-- **seleniumbase** - Web scraping (para soccerdata)
+### 🔹 Módulo 4: Verificación de Resultados y Gestión de Bankroll (`src/worker/`)
+- [x] Tarea periódica de verificación de partidos finalizados (cada 10 min)
+- [x] Evaluación automática de mercados de goles (Over 1.5, Over 2.5, Over 3.5, BTTS)
+- [x] Notificación automática a suscriptores cuando un pick se gana o se pierde
+- [ ] Verificación de mercados de córners y tarjetas (eliminar estado `NO_VERIFICABLE`)
+- [ ] Cálculo de rentabilidad real: Unidades ganadas (+/- U), ROI / Yield %, racha actual
 
-## 📦 Instalación
+### 🔹 Módulo 5: Bot de Telegram Interactivo (`src/bot/`)
+- [x] Comandos de administración básicos (`/start`, `/status`, `/historial`, `/stats`, `/pause`, `/resume`, `/debug`, `/debugodds`)
+- [x] Servidor HTTP de salud integrado en segundo plano en puerto 8000 (`/` y `/health`)
+- [x] Difusión automática de señales a suscriptores activos
+- [ ] Menú interactivo con botones Inline (`InlineKeyboardMarkup`)
+- [ ] Comando interactivo `/calendario` y `/jornada` para consultar partidos por fecha
+- [ ] Comando `/combinada` para generar un ticket bajo demanda
+- [ ] Preferencias personalizadas por usuario (alertas de goles, cuota mínima deseada, etc.)
 
-### 1. Clona el repositorio
+### 🔹 Módulo 6: Despliegue y Operación 24/7 (`deploy/`)
+- [x] Contenedor Docker optimizado (`Dockerfile` con Python 3.12 y dependencias matemáticas)
+- [x] Servidor de salud compatible con plataformas cloud (Render / Koyeb)
+- [x] Soporte para variables `TELEGRAM_TOKEN` y `TELEGRAM_BOT_TOKEN`
+- [x] Código sincronizado en GitHub (`main`)
+- [ ] Despliegue activo en producción 24/7 en Render con monitor de UptimeRobot
+
+---
+
+## 🛠️ Tecnologías y Librerías
+
+* **Python 3.12+**
+* **python-telegram-bot 21.6+** (Framework asíncrono con JobQueue)
+* **httpx** (Cliente HTTP asíncrono de alto rendimiento)
+* **pandas & numpy** (Manipulación matricial de datos)
+* **scipy** (Distribuciones Poisson y estadísticas)
+* **Docker** (Empaquetado y aislamiento en contenedor)
+
+---
+
+## 🚀 Uso Rápido en Local
+
 ```bash
-git clone https://github.com/tu-usuario/bet.git
-cd bet
-```
+# 1. Clonar el repositorio
+git clone https://github.com/Levelasquez15/bet_bot.git
+cd bet_bot
 
-### 2. Instala dependencias
-```bash
-# Dependencias principales
+# 2. Crear entorno virtual e instalar dependencias
+py -m venv venv
+venv\Scripts\activate
 pip install -r requirements.txt
 
-# Dependencias específicas del bot
-pip install -r requirements.bot.txt
+# 3. Configurar variables de entorno
+cp .env.example .env
+# Agregar TELEGRAM_TOKEN=tu_token_aqui en .env
+
+# 4. Iniciar el bot
+py telegram_bot.py
 ```
-
-### 3. Configura variables de entorno
-Crea un archivo `.env` con:
-```env
-TELEGRAM_BOT_TOKEN=tu_token_aqui
-```
-
-## 🚀 Uso del bot
-
-### Iniciar el bot
-```bash
-python telegram_bot.py
-```
-O usa los scripts preparados:
-- **Windows**: `run_telegram_bot.bat`
-- **PowerShell**: `run_telegram_bot.ps1`
-
-### Comandos disponibles
-- `/start` - Iniciar el bot y ver ayuda
-- `/calendario` - Seleccionar fecha y ver partidos
-- `/jornada` - Análisis rápido de partidos del día
-- `/combinada` - Generar combinadas automáticas
-- `/help` - Ver todos los comandos disponibles
-
-### Flujo típico de uso
-1. **Seleccionar fecha**: Usa `/calendario` y elige "Hoy", "Mañana" o una fecha específica
-2. **Ver partidos**: El bot muestra todos los partidos programados
-3. **Elegir modo**:
-   - **Automático**: Analiza todos los partidos
-   - **Manual**: Selecciona partidos específicos
-4. **Obtener recomendaciones**: Recibe análisis detallado con probabilidades y picks recomendados
-
-## 📊 Ejemplo de respuesta
-
-```
-🎯 Análisis automático para 2026-03-26
-
-🏟️ Real Madrid vs Barcelona
-✅ Recomendación: Over 2.5 (67.3% de probabilidad)
-📊 Probabilidades: 1: 45.2% | X: 24.1% | 2: 30.7%
-💡 Razonamiento: Modelo Poisson + forma reciente
-
-🎰 Combinada automática (3 legs):
-Probabilidad combinada: 23.8% | Cuota estimada: 4.20
-```
-
-## 🔧 Configuración avanzada
-
-### Ligas soportadas
-Por defecto usa "Big 5 European Leagues Combined", pero puedes modificar en `src/soccerdata_fixtures.py`:
-```python
-leagues = ["ENG-Premier League", "ESP-La Liga", "ITA-Serie A", "GER-Bundesliga", "FRA-Ligue 1"]
-```
-
-### Temporadas
-Configura la temporada actual en los handlers:
-```python
-seasons = "2526"  # Para 2025-2026
-```
-
-### Umbrales de confianza
-Ajusta en `prediction_service.py`:
-```python
-min_prob = 0.55  # Mínima probabilidad para recomendaciones
-```
-
-## 🐛 Solución de problemas
-
-### Error 403 en soccerdata
-FBref bloquea requests automatizados. Soluciones:
-1. **Usar VPN** o proxy
-2. **Datos cacheados**: `force_cache=True`
-3. **Temporada anterior**: Cambiar `seasons` a "2324"
-
-### Dependencias conflictivas
-Si hay problemas con urllib3:
-```bash
-pip install --upgrade --force-reinstall soccerdata==1.8.8 seleniumbase==4.38.2
-```
-
-### Bot no responde
-1. Verifica el token de Telegram en `.env`
-2. Asegúrate de que `allowed_updates` incluya `"callback_query"`
-3. Revisa logs del bot
-
-## 📈 Mejoras futuras
-
-- [ ] Integración con APIs de cuotas en tiempo real
-- [ ] Modelo de machine learning avanzado
-- [ ] Análisis de lesiones y suspensions
-- [ ] Estadísticas de jugadores individuales
-- [ ] Backtesting histórico completo
-- [ ] Notificaciones push para partidos importantes
-
-## ⚠️ Descargo de responsabilidad
-
-Este bot es para **fines educativos y de entretenimiento**. Las predicciones son estimaciones matemáticas y no garantizan resultados. El fútbol tiene incertidumbre inherente. **Apusta responsablemente** y nunca arriesgues más de lo que puedes permitirte perder.
-
-## 📄 Licencia
-
-MIT License - ver LICENSE para detalles.
-
-## Ejecucion
-
-```bash
-streamlit run app_streamlit.py
-```
-
-O simplemente:
-- **Windows**: Doble clic en `run.bat`
-- **PowerShell**: `.\run.ps1`
-
-La API key se carga automáticamente desde `.env`.
-
-## Bot de Telegram
-
-1. Crea un bot con `@BotFather` y copia tu token.
-2. En `.env` define:
-
-```bash
-API_FOOTBALL_KEY=TU_API_KEY
-TELEGRAM_BOT_TOKEN=TU_TELEGRAM_BOT_TOKEN
-```
-
-3. Ejecuta:
-
-```bash
-python telegram_bot.py
-```
-
-Atajos:
-- CMD: doble clic en `run_telegram_bot.bat`
-- PowerShell: `powershell -ExecutionPolicy Bypass -File run_telegram_bot.ps1`
-
-Comandos del bot:
-- `/start`
-- `/status`
-- `/setleague <league_id> <season>`
-- `/predict <Local> | <Visitante>`
-- `/analyze_next [n]`
-- `/backtest [min_history]`
-
-## Subir a GitHub
-
-1. Inicializa git y crea el primer commit:
-
-```bash
-git init
-git add .
-git commit -m "Initial commit: football predictor + telegram bot"
-```
-
-2. Crea repo vacio en GitHub y conecta remoto:
-
-```bash
-git branch -M main
-git remote add origin https://github.com/TU_USUARIO/TU_REPO.git
-git push -u origin main
-```
-
-`Nota`: `.env` ya esta ignorado por `.gitignore`, no se sube al repositorio.
-
-## Despliegue en Azure (Container Apps)
-
-La opcion recomendada para un bot 24/7 es Azure Container Apps.
-
-### Paso 1: primer despliegue manual
-
-Ejecuta (PowerShell):
-
-```powershell
-./scripts/azure_first_deploy.ps1 \
-  -ResourceGroup "rg-bet-bot" \
-  -Location "eastus" \
-  -AcrName "betbotacr123" \
-  -ContainerEnvName "betbot-env" \
-  -ContainerAppName "bet-telegram-bot" \
-  -ApiFootballKey "TU_API_FOOTBALL_KEY" \
-  -TelegramBotToken "TU_TELEGRAM_BOT_TOKEN"
-```
-
-### Paso 2: habilitar despliegue continuo desde GitHub Actions
-
-El workflow ya existe en `.github/workflows/deploy-azure-containerapp.yml`.
-
-Configura en GitHub:
-
-- `Secrets`:
-  - `AZURE_CREDENTIALS` (service principal JSON de `az ad sp create-for-rbac`)
-- `Repository Variables`:
-  - `ACR_NAME`
-  - `ACR_LOGIN_SERVER`
-  - `AZURE_RESOURCE_GROUP`
-  - `CONTAINER_APP_NAME`
-
-Cada push a `main` va a:
-1. construir imagen en ACR,
-2. actualizar tu Container App,
-3. mantener los secretos en Azure (`api-football-key`, `telegram-bot-token`).
-
-## Costos con creditos de Azure
-
-- Usa `min-replicas=1` para que el bot siempre este activo.
-- Mantente en SKU basicos (`ACR Basic`, Container Apps consumo) para cuidar tus 200 USD.
-- Monitorea consumo en Cost Management semanalmente.
-
-## Probar conexion a API-Football
-
-```bash
-set API_FOOTBALL_KEY=TU_API_KEY
-python scripts/test_api_connection.py
-```
-
-## Formato minimo del CSV
-
-Columnas obligatorias:
-
-- `date` (ISO, por ejemplo `2025-03-10` o `2025-03-10T18:00:00Z`)
-- `home_team`
-- `away_team`
-- `home_goals`
-- `away_goals`
-
-Columnas opcionales para enriquecer analisis:
-
-- `home_odds`
-- `draw_odds`
-- `away_odds`
-
-## Notas
-
-- El ajuste Elo se aplica sobre los lambdas base de Poisson para evitar que el modelo solo dependa de goles historicos.
-- No existe margen de error cero en apuestas deportivas. El sistema reduce incertidumbre con validacion y filtros de EV, pero siempre hay riesgo estadistico.
-- Para produccion, conviene:
-  - calibrar hiperparametros (`k_factor`, `home_advantage`, `max_goals`),
-  - guardar snapshots diarios de features/predicciones,
-  - automatizar ejecucion con scheduler (Airflow/Cron/GitHub Actions).
