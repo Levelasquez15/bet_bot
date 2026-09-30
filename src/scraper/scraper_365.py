@@ -1,4 +1,5 @@
 import logging
+import asyncio
 import httpx
 from datetime import datetime, timezone, timedelta
 from typing import Dict, Any, List, Optional
@@ -67,13 +68,61 @@ def extract_match_odds(game: dict) -> Dict[str, Any]:
     return result
 
 
+def parse_statistics_payload(raw_stats: list, home_id: int) -> Dict[str, Any]:
+    """Convierte la lista cruda de estadísticas de 365scores en un diccionario estructurado."""
+    parsed = {
+        "has_stats": True,
+        "possession": {"home": 50.0, "away": 50.0},
+        "xg": {"home": 0.0, "away": 0.0},
+        "shots_total": {"home": 0, "away": 0},
+        "shots_on_target": {"home": 0, "away": 0},
+        "corners": {"home": 0, "away": 0},
+        "yellow_cards": {"home": 0, "away": 0},
+        "red_cards": {"home": 0, "away": 0},
+    }
+
+    for s in raw_stats:
+        name = str(s.get("name", "")).lower()
+        cid = s.get("competitorId")
+        raw_val = str(s.get("value", "0")).replace("%", "").strip()
+        side = "home" if cid == home_id else "away"
+
+        key = None
+        is_float = False
+
+        if "posesi" in name:
+            key = "possession"
+            is_float = True
+        elif "goles esperados" in name and "recibidos" not in name:
+            key = "xg"
+            is_float = True
+        elif "total remates" in name:
+            key = "shots_total"
+        elif "remates al arco" in name:
+            key = "shots_on_target"
+        elif "esquina" in name or "corner" in name:
+            key = "corners"
+        elif "tarjetas amarillas" in name:
+            key = "yellow_cards"
+        elif "tarjetas rojas" in name:
+            key = "red_cards"
+
+        if key:
+            try:
+                parsed[key][side] = float(raw_val) if is_float else int(float(raw_val))
+            except (ValueError, TypeError):
+                pass
+
+    return parsed
+
+
 class Scraper365:
-    """Motor robusto de recolección de datos en tiempo real de 365scores."""
+    """Motor robusto de recolección de datos y estadísticas en tiempo real de 365scores."""
 
     BASE_URL = "https://webws.365scores.com/web/games/"
+    STATS_URL = "https://webws.365scores.com/web/game/stats/"
 
     def __init__(self, timeout: float = 30.0):
-        # Transport con reintentos automáticos para evitar microcortes de red
         transport = httpx.AsyncHTTPTransport(retries=3)
         self.session = httpx.AsyncClient(
             transport=transport,
@@ -112,7 +161,7 @@ class Scraper365:
             games = data.get("games", [])
             return games
         except httpx.TimeoutException:
-            logger.error("Timeout conectando a 365scores (se agotó el tiempo de espera).")
+            logger.error("Timeout conectando a 365scores.")
             return []
         except httpx.HTTPStatusError as e:
             logger.error(f"HTTP {e.response.status_code} en 365scores.")
@@ -121,28 +170,72 @@ class Scraper365:
             logger.error(f"Error inesperado en fetch_games: {e}")
             return []
 
-    async def fetch_live_matches(self, filter_leagues: bool = True, min_tier: int = 3) -> List[Dict[str, Any]]:
+    async def fetch_game_live_stats(self, game_id: int, home_id: int) -> Dict[str, Any]:
+        """
+        Consulta las estadísticas en vivo avanzadas de un partido específico:
+        posesión, remates al arco, córners, xG y tarjetas.
+        """
+        try:
+            params = {
+                "games": str(game_id),
+                "appTypeId": "5",
+                "langId": "29"
+            }
+            res = await self.session.get(self.STATS_URL, params=params, timeout=12.0)
+            if res.status_code == 200:
+                data = res.json()
+                raw_stats = data.get("statistics", [])
+                if raw_stats:
+                    return parse_statistics_payload(raw_stats, home_id)
+        except Exception as e:
+            logger.debug(f"No se pudieron obtener estadísticas para partido {game_id}: {e}")
+
+        # Retornar estructura por defecto si no están disponibles
+        return {
+            "has_stats": False,
+            "possession": {"home": 50.0, "away": 50.0},
+            "xg": {"home": 0.0, "away": 0.0},
+            "shots_total": {"home": 0, "away": 0},
+            "shots_on_target": {"home": 0, "away": 0},
+            "corners": {"home": 0, "away": 0},
+            "yellow_cards": {"home": 0, "away": 0},
+            "red_cards": {"home": 0, "away": 0},
+        }
+
+    async def fetch_live_matches(self, filter_leagues: bool = True, min_tier: int = 3, fetch_stats: bool = True) -> List[Dict[str, Any]]:
         """
         Devuelve partidos EN VIVO (en juego + medio tiempo),
-        enriquecidos con cuotas y filtrados por relevancia de liga.
+        enriquecidos con cuotas y estadísticas avanzadas en tiempo real.
         """
         games = await self._fetch_games(include_tomorrow=False)
         live = []
 
         for g in games:
-            # Solo partidos en juego o medio tiempo
             if g.get("statusGroup") not in (STATUS_LIVE, STATUS_HALF_TIME):
                 continue
 
-            # Filtro inteligente de ligas (ignorar juveniles, 7ª división, amateurs)
             if filter_leagues and not is_valid_match(g, min_tier=min_tier):
                 continue
 
-            # Enriquecer con cuotas normalizadas
             g["parsed_odds"] = extract_match_odds(g)
             live.append(g)
 
-        logger.info(f"Partidos en vivo detectados (filtrados): {len(live)}")
+        # Si hay partidos en vivo, consultar estadísticas en paralelo para no demorar la respuesta
+        if fetch_stats and live:
+            tasks = []
+            for g in live:
+                gid = g.get("id")
+                home_id = g.get("homeCompetitor", {}).get("id", 0)
+                tasks.append(self.fetch_game_live_stats(gid, home_id))
+
+            stats_results = await asyncio.gather(*tasks, return_exceptions=True)
+            for g, st in zip(live, stats_results):
+                if isinstance(st, dict):
+                    g["live_stats"] = st
+                else:
+                    g["live_stats"] = {"has_stats": False}
+
+        logger.info(f"Partidos en vivo detectados y enriquecidos con estadísticas: {len(live)}")
         return live
 
     async def fetch_upcoming_matches(self, hours_ahead: int = 4, filter_leagues: bool = True, min_tier: int = 3) -> List[Dict[str, Any]]:
@@ -159,7 +252,6 @@ class Scraper365:
             if g.get("statusGroup") != STATUS_UPCOMING:
                 continue
 
-            # Filtro inteligente de ligas
             if filter_leagues and not is_valid_match(g, min_tier=min_tier):
                 continue
 
@@ -178,7 +270,7 @@ class Scraper365:
     async def fetch_all_for_debug(self) -> dict:
         """Devuelve diagnóstico completo del estado del scraper y datos en tiempo real."""
         games = await self._fetch_games(include_tomorrow=True)
-        live_games = await self.fetch_live_matches(filter_leagues=True)
+        live_games = await self.fetch_live_matches(filter_leagues=True, fetch_stats=True)
         upcoming = await self.fetch_upcoming_matches(hours_ahead=4, filter_leagues=True)
 
         return {
@@ -186,7 +278,7 @@ class Scraper365:
             "live_filtered": len(live_games),
             "upcoming_filtered": len(upcoming),
             "live_sample": [
-                f"{g.get('homeCompetitor',{}).get('name','?')} {g.get('homeCompetitor',{}).get('score',0)}-{g.get('awayCompetitor',{}).get('score',0)} {g.get('awayCompetitor',{}).get('name','?')} (min {int(float(g.get('gameTime',0)))}) [{g.get('competitionDisplayName')}]"
+                f"{g.get('homeCompetitor',{}).get('name','?')} {g.get('homeCompetitor',{}).get('score',0)}-{g.get('awayCompetitor',{}).get('score',0)} {g.get('awayCompetitor',{}).get('name','?')} (min {int(float(g.get('gameTime',0)))}) [{g.get('competitionDisplayName')}] | Tiros: {g.get('live_stats',{}).get('shots_on_target',{}).get('home',0)}-{g.get('live_stats',{}).get('shots_on_target',{}).get('away',0)} | Córners: {g.get('live_stats',{}).get('corners',{}).get('home',0)}-{g.get('live_stats',{}).get('corners',{}).get('away',0)}"
                 for g in live_games[:5]
             ],
             "upcoming_sample": [

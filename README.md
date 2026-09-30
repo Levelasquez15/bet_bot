@@ -19,7 +19,7 @@ Motor inteligente de pronósticos deportivos en tiempo real para fútbol, combin
 - [x] Filtro y categorización por Ligas Top (`src/scraper/leagues.py`)
 - [x] Descarte inteligente de partidos juveniles (Sub-17/19), reservas y ligas amateurs
 - [x] Extracción y normalización robusta de cuotas 1X2 desde 365scores
-- [ ] Extracción de estadísticas en vivo avanzadas adicionales (tiros a puerta, posesión, córners)
+- [x] Extracción de estadísticas en vivo avanzadas (tiros a puerta, posesión, córners, xG en tiempo real)
 
 ### 🔹 Módulo 2: Motor Matemático y Análisis Predictivo (`src/analyzer/`, `src/models/`)
 - [x] Árboles de decisión heurísticos básicos para partidos en vivo
