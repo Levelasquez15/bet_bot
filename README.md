@@ -22,12 +22,12 @@ Motor inteligente de pronósticos deportivos en tiempo real para fútbol, combin
 - [x] Extracción de estadísticas en vivo avanzadas (tiros a puerta, posesión, córners, xG en tiempo real)
 
 ### 🔹 Módulo 2: Motor Matemático y Análisis Predictivo (`src/analyzer/`, `src/models/`)
-- [x] Árboles de decisión heurísticos básicos para partidos en vivo
-- [x] Estimación básica de distribución de goles con Poisson
-- [ ] Integración real del sistema Elo con cálculo de ventaja local/visitante
-- [ ] Cálculo de Valor Esperado ($EV > 0$ / Value Betting): Probabilidad del modelo vs Cuota real
-- [ ] Filtro de confianza configurable por umbrales matemáticos
-- [ ] Algoritmo generador de apuestas combinadas (Parlays de 2-3 selecciones con mejor value)
+- [x] Árboles de decisión heurísticos avanzados para partidos en vivo (xG, tiros a puerta, córners, posesión)
+- [x] Distribución bivariada de Poisson para 1X2, Over/Under (1.5, 2.5, 3.5), Doble Oportunidad y BTTS
+- [x] Integración real del sistema Elo con cálculo de ventaja local/visitante y calibración dinámica de goles esperados
+- [x] Cálculo de Valor Esperado ($EV > 0$ / Value Betting): Probabilidad del modelo vs Cuota real del bookmaker
+- [x] Dimensionamiento de apuesta inteligente con Criterio de Kelly fraccional (Stake 1 al 5)
+- [x] Algoritmo generador de apuestas combinadas (Parlays de 2-3 selecciones optimizando cuota y probabilidad acumulada)
 
 ### 🔹 Módulo 3: Base de Datos y Persistencia (`src/db/`)
 - [x] Almacenamiento básico en archivos JSON planos (`subscribers.json`, `picks_history.json`)
@@ -46,9 +46,9 @@ Motor inteligente de pronósticos deportivos en tiempo real para fútbol, combin
 - [x] Comandos de administración básicos (`/start`, `/status`, `/historial`, `/stats`, `/pause`, `/resume`, `/debug`, `/debugodds`)
 - [x] Servidor HTTP de salud integrado en segundo plano en puerto 8000 (`/` y `/health`)
 - [x] Difusión automática de señales a suscriptores activos
+- [x] Comando `/combinada` y `/parlay` para generar un ticket inteligente bajo demanda con valor matemático
 - [ ] Menú interactivo con botones Inline (`InlineKeyboardMarkup`)
 - [ ] Comando interactivo `/calendario` y `/jornada` para consultar partidos por fecha
-- [ ] Comando `/combinada` para generar un ticket bajo demanda
 - [ ] Preferencias personalizadas por usuario (alertas de goles, cuota mínima deseada, etc.)
 
 ### 🔹 Módulo 6: Despliegue y Operación 24/7 (`deploy/`)

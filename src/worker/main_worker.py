@@ -27,13 +27,15 @@ def format_live_pick(pick: dict) -> str:
 
 
 def format_upcoming_pick(pick: dict) -> str:
-    stake = 3 if pick["confidence"] >= 78 else 2
+    v_info = pick.get("value_info")
+    stake = v_info.get("recommended_stake", 2) if v_info else (3 if pick["confidence"] >= 78 else 2)
+    ev_str = f"\n📈 <b>VALOR ESPERADO (EV):</b> +{v_info['ev_pct']}%\n🎯 <b>CUOTA JUSTA:</b> {v_info['fair_odd']}" if v_info else ""
     return (
-        f"📅⚽ <b>ANÁLISIS PRE-PARTIDO</b> ⚽📅\n\n"
+        f"📅⚽ <b>ANÁLISIS PRE-PARTIDO (VALUE BET)</b> ⚽📅\n\n"
         f"<b>{pick['match']}</b>\n"
         f"🕐 Inicio: {pick['minute']}\n\n"
         f"{pick['market']}\n\n"
-        f"💶 <b>CUOTA</b> 👉 {pick.get('odd', 'Validada ✅')}\n\n"
+        f"💶 <b>CUOTA CASA</b> 👉 {pick.get('odd', 'Validada ✅')}{ev_str}\n\n"
         f"📊 <b>PROBABILIDAD</b> 📊 👉 {pick['confidence']}%\n"
         f"💡 {pick['reason']}\n\n"
         f"STAKE {stake}"

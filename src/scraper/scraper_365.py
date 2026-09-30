@@ -139,36 +139,47 @@ class Scraper365:
         tomorrow = datetime.now(tz=BOGOTA_TZ) + timedelta(days=1)
         return tomorrow.strftime("%d/%m/%Y")
 
-    def _base_params(self, include_tomorrow: bool = False) -> dict:
-        return {
-            "appTypeId": "5",
-            "langId": "29",
-            "timezoneName": "America/Bogota",
-            "userCountryId": "170",
-            "sports": "1",
-            "showOdds": "true",
-            "startDate": self._today_str(),
-            "endDate": self._tomorrow_str() if include_tomorrow else self._today_str(),
-        }
-
-    async def _fetch_games(self, include_tomorrow: bool = False) -> List[Dict[str, Any]]:
-        """Consulta los partidos crudos desde la API web de 365scores."""
+    async def _fetch_single_day(self, date_str: str) -> List[Dict[str, Any]]:
+        """Consulta los partidos de una fecha específica."""
         try:
-            params = self._base_params(include_tomorrow=include_tomorrow)
+            params = {
+                "appTypeId": "5",
+                "langId": "29",
+                "timezoneName": "America/Bogota",
+                "userCountryId": "170",
+                "sports": "1",
+                "showOdds": "true",
+                "startDate": date_str,
+                "endDate": date_str,
+            }
             response = await self.session.get(self.BASE_URL, params=params)
             response.raise_for_status()
             data = response.json()
-            games = data.get("games", [])
-            return games
-        except httpx.TimeoutException:
-            logger.error("Timeout conectando a 365scores.")
-            return []
-        except httpx.HTTPStatusError as e:
-            logger.error(f"HTTP {e.response.status_code} en 365scores.")
-            return []
+            return data.get("games", [])
         except Exception as e:
-            logger.error(f"Error inesperado en fetch_games: {e}")
+            logger.error(f"Error consultando fecha {date_str}: {e}")
             return []
+
+    async def _fetch_games(self, include_tomorrow: bool = False) -> List[Dict[str, Any]]:
+        """Consulta los partidos crudos desde la API web de 365scores (hoy y opcionalmente mañana)."""
+        if not include_tomorrow:
+            return await self._fetch_single_day(self._today_str())
+
+        # Consultar hoy y mañana en paralelo
+        t_today = self._fetch_single_day(self._today_str())
+        t_tomorrow = self._fetch_single_day(self._tomorrow_str())
+        results = await asyncio.gather(t_today, t_tomorrow, return_exceptions=True)
+
+        combined = []
+        seen_ids = set()
+        for res in results:
+            if isinstance(res, list):
+                for g in res:
+                    gid = g.get("id")
+                    if gid and gid not in seen_ids:
+                        seen_ids.add(gid)
+                        combined.append(g)
+        return combined
 
     async def fetch_game_live_stats(self, game_id: int, home_id: int) -> Dict[str, Any]:
         """
@@ -211,7 +222,17 @@ class Scraper365:
         live = []
 
         for g in games:
-            if g.get("statusGroup") not in (STATUS_LIVE, STATUS_HALF_TIME):
+            status_text = str(g.get("statusText", "")).strip()
+            status_group = g.get("statusGroup")
+            game_time = g.get("gameTime", -1)
+
+            # En 365scores, a veces statusGroup es 2 para programados si statusText es "Prog."
+            # Un partido está en vivo si el reloj corre, es entretiempo o el estado indica juego activo
+            is_live = (
+                status_text not in ("Prog.", "Aplazado", "Finalizado", "Fin", "Suspendido")
+                and (game_time > 0 or status_group in (STATUS_LIVE, STATUS_HALF_TIME) or status_text in ("1T", "2T", "MT", "Descanso"))
+            )
+            if not is_live:
                 continue
 
             if filter_leagues and not is_valid_match(g, min_tier=min_tier):
@@ -249,7 +270,15 @@ class Scraper365:
         upcoming = []
 
         for g in games:
-            if g.get("statusGroup") != STATUS_UPCOMING:
+            status_text = str(g.get("statusText", "")).strip()
+            status_group = g.get("statusGroup")
+
+            # Próximos: estado "Prog." o statusGroup == 1, excluyendo aplazados o terminados
+            is_upcoming = (
+                (status_text == "Prog." or status_group == STATUS_UPCOMING)
+                and status_text not in ("Aplazado", "Cancelado", "Finalizado", "Fin")
+            )
+            if not is_upcoming:
                 continue
 
             if filter_leagues and not is_valid_match(g, min_tier=min_tier):

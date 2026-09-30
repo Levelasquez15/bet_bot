@@ -5,6 +5,8 @@ from telegram.ext import Application, CommandHandler, ContextTypes
 from src.bot.subscribers import add_subscriber, get_subscribers, set_paused
 from src.bot.pick_tracker import get_stats, get_recent_picks
 from src.scraper.scraper_365 import Scraper365
+from src.analyzer.logic_tree import LogicTreeAnalyzer
+from src.analyzer.combinadas import generate_best_parlay, format_parlay_message
 
 logger = logging.getLogger(__name__)
 
@@ -26,15 +28,18 @@ async def start_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> N
         await update.message.reply_html(
             rf"¡Hola {user.mention_html()}! Soy 365BetBot. 🤖"
             "\n\n✅ <b>¡Registrado con éxito!</b>"
-            "\nRecibirás alertas de partidos <b>en vivo</b> y <b>próximos</b>."
+            "\nRecibirás alertas de partidos <b>en vivo</b> y <b>próximos</b> con Valor Esperado (+EV)."
             "\n\n📊 Tecnología:"
-            "\n  • 8 árboles de decisión (live)"
-            "\n  • Modelo Poisson (pre-partido)"
+            "\n  • 8 árboles de decisión con estadísticas en vivo (posesión, xG, remates)"
+            "\n  • Modelo Poisson bivariado + Ranking Elo de clubes"
+            "\n  • Value Betting matemático & Criterio de Kelly"
+            "\n  • Generador inteligente de combinadas / parlays"
             "\n  • Verificación automática de resultados"
-            "\n<b>Comandos disponibles:</b>"
-            "\n/status — Estado del motor"
+            "\n\n<b>Comandos disponibles:</b>"
+            "\n/combinada — Genera un ticket de combinada óptima (2-3 selecciones)"
+            "\n/status — Estado del motor y métricas"
             "\n/historial — Últimos 10 picks enviados"
-            "\n/stats — Tu tasa de acierto"
+            "\n/stats — Tasa de acierto y efectividad"
             "\n/pause — Pausa las notificaciones"
             "\n/resume — Reactiva las notificaciones"
             "\n/debug — Datos en tiempo real del scraper"
@@ -42,8 +47,8 @@ async def start_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> N
     else:
         await update.message.reply_html(
             rf"¡Hola de nuevo {user.mention_html()}! 👋"
-            "\n\nYa estás registrado. Sigo analizando cada 2 minutos. 🔄"
-            "\nUsa /historial o /stats para ver el rendimiento del bot. 🎯"
+            "\n\nYa estás registrado. Sigo analizando partidos continuamente. 🔄"
+            "\nUsa /combinada para un ticket inmediato o /stats para ver el rendimiento. 🎯"
         )
     set_paused(chat_id, False)
 
@@ -54,9 +59,10 @@ async def status_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
     await update.message.reply_html(
         "📊 <b>Estado del Motor BetBot</b>\n\n"
         "✅ Scraping 365scores: ACTIVO\n"
-        "✅ Análisis en Vivo (8 árboles): ACTIVO\n"
-        "✅ Análisis Próximos (Poisson): ACTIVO\n"
-        "✅ Verificación de resultados: ACTIVO\n"
+        "✅ Análisis en Vivo (8 árboles con stats avanzadas): ACTIVO\n"
+        "✅ Análisis Próximos (Poisson + Elo + Value Betting): ACTIVO\n"
+        "✅ Generador de Combinadas / Parlays: ACTIVO\n"
+        "✅ Verificación automática de resultados: ACTIVO\n"
         f"👥 Suscriptores: {len(subs)}\n"
         f"📈 Picks totales enviados: {stats['total']}\n"
         f"🏆 Efectividad: {stats['efectividad']}%\n"
@@ -177,6 +183,39 @@ async def debugodds_command(update: Update, context: ContextTypes.DEFAULT_TYPE) 
     finally:
         await scraper.close()
 
+async def combinada_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Genera en tiempo real un ticket de apuesta combinada optimizada con Valor Esperado."""
+    await update.message.reply_text("🎰 Calculando la mejor combinada con valor matemático... un momento.")
+    scraper = Scraper365()
+    analyzer = LogicTreeAnalyzer()
+    try:
+        upcoming_games = await scraper.fetch_upcoming_matches(hours_ahead=24, filter_leagues=True)
+        if not upcoming_games:
+            await update.message.reply_text("❌ No hay partidos programados en las próximas 24 horas.")
+            return
+
+        picks = analyzer.analyze_upcoming(upcoming_games)
+        if len(picks) < 2:
+            await update.message.reply_text(
+                f"⚠️ Solo se encontraron {len(picks)} selecciones con Valor Esperado positivo (+EV). "
+                "Se requieren al menos 2 partidos para armar una combinada."
+            )
+            return
+
+        parlay = generate_best_parlay(picks, legs=min(3, len(picks)))
+        if not parlay:
+            await update.message.reply_text("⚠️ No se encontró una combinación que cumpla con los filtros de cuota (2.0 a 6.0) y probabilidad acumulada.")
+            return
+
+        msg = format_parlay_message(parlay)
+        await update.message.reply_html(msg)
+    except Exception as e:
+        logger.error(f"Error generando combinada: {e}", exc_info=True)
+        await update.message.reply_text(f"❌ Error calculando combinada: {e}")
+    finally:
+        await scraper.close()
+
+
 def create_application() -> Application:
     token = os.getenv("TELEGRAM_TOKEN") or os.getenv("TELEGRAM_BOT_TOKEN")
     if not token:
@@ -185,6 +224,8 @@ def create_application() -> Application:
     app = Application.builder().token(token).build()
     app.add_handler(CommandHandler("start",     start_command))
     app.add_handler(CommandHandler("status",    status_command))
+    app.add_handler(CommandHandler("combinada", combinada_command))
+    app.add_handler(CommandHandler("parlay",    combinada_command))
     app.add_handler(CommandHandler("historial", historial_command))
     app.add_handler(CommandHandler("stats",     stats_command))
     app.add_handler(CommandHandler("pause",     pause_command))
