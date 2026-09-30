@@ -3,18 +3,10 @@
     "src",
     "telegram_bot.py"
   ],
+  "venvPath": ".",
+  "venv": ".venv",
   "extraPaths": [
-    "C:/Users/pc/AppData/Local/Programs/Python/Python314/Lib/site-packages",
+    ".venv/Lib/site-packages",
     "."
-  ],
-  "executionEnvironments": [
-    {
-      "root": ".",
-      "pythonPath": "C:/Users/pc/AppData/Local/Programs/Python/Python314/python.exe",
-      "extraPaths": [
-        "C:/Users/pc/AppData/Local/Programs/Python/Python314/Lib/site-packages",
-        "."
-      ]
-    }
   ]
 }
