@@ -134,3 +134,17 @@ class EloModel:
                 json.dump(self.ratings, f, ensure_ascii=False, indent=2)
         except Exception as e:
             logger.error(f"Error guardando elo_ratings.json: {e}")
+
+
+default_elo_model = EloModel()
+
+
+def estimate_lambdas(home_team: str, away_team: str, base_league_goals: float = 2.65) -> Tuple[float, float]:
+    """Helper global para calcular goles esperados con base en rating Elo."""
+    return default_elo_model.estimate_lambdas(home_team, away_team, base_league_goals)
+
+
+def get_team_elo(team: str) -> float:
+    """Helper global para consultar el rating Elo actual de un equipo."""
+    return default_elo_model.get_rating(team)
+
