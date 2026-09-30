@@ -53,22 +53,22 @@ Motor inteligente de pronósticos deportivos en tiempo real para fútbol, combin
 - [x] Preferencias personalizadas por usuario: alternar alertas Live, Pre-partido o Pausa global con botones interactivos
 
 ### 🔹 Módulo 6: Despliegue y Operación 24/7 (`deploy/`)
-- [x] Contenedor Docker optimizado (`Dockerfile` con Python 3.12 y dependencias matemáticas)
-- [x] Servidor de salud compatible con plataformas cloud (Render / Koyeb)
+- [x] Contenedor Docker optimizado (`Dockerfile` ligero con Python 3.12 y arranque ultra-rápido)
+- [x] Servidor de salud HTTP en segundo plano en puerto 8000 con telemetría en vivo (`/` y `/health`)
 - [x] Soporte para variables `TELEGRAM_TOKEN` y `TELEGRAM_BOT_TOKEN`
-- [x] Código sincronizado en GitHub (`main`)
-- [ ] Despliegue activo en producción 24/7 en Render con monitor de UptimeRobot
+- [x] Código sincronizado en GitHub (`main`) con auto-despliegue continuo en Render
+- [x] Arquitectura 100% gratuita 24/7 lista para monitor de UptimeRobot (ping cada 5 min a `/health`)
 
 ---
 
 ## 🛠️ Tecnologías y Librerías
 
 * **Python 3.12+**
-* **python-telegram-bot 21.6+** (Framework asíncrono con JobQueue)
-* **httpx** (Cliente HTTP asíncrono de alto rendimiento)
-* **pandas & numpy** (Manipulación matricial de datos)
-* **scipy** (Distribuciones Poisson y estadísticas)
-* **Docker** (Empaquetado y aislamiento en contenedor)
+* **python-telegram-bot 21.6+** (Framework asíncrono con JobQueue y botones táctiles)
+* **httpx** (Cliente HTTP asíncrono con `AsyncHTTPTransport` resiliente)
+* **pandas & numpy** (Manipulación matricial de datos y modelos matemáticos)
+* **SQLite Relacional con modo WAL** (Persistencia concurrente de alto rendimiento)
+* **Docker** (Empaquetado ligero sin dependencias pesadas de compilación)
 
 ---
 
