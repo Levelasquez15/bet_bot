@@ -59,6 +59,21 @@ Motor inteligente de pronósticos deportivos en tiempo real para fútbol, combin
 - [x] Código sincronizado en GitHub (`main`) con auto-despliegue continuo en Render
 - [x] Arquitectura 100% gratuita 24/7 lista para monitor de UptimeRobot (ping cada 5 min a `/health`)
 
+### 🔹 Módulo 7: Motor de Decisión con Grafo de Agentes y LLM Supervisor (`src/graph/`) 🔮 [PRÓXIMA FASE]
+- [ ] **Arquitectura de Grafo de Estados (Decision Graph / StateGraph):**
+  - Encapsular los 8 árboles heurísticos en **Nodos Especialistas** independientes (Nodo Momentum, Nodo Asedio & xG, Nodo Poisson/Elo +EV, Nodo Disciplinario/Tarjetas).
+  - Enrutamiento dinámico según el contexto del partido (minuto, marcador, posesión y estado numérico de jugadores).
+- [ ] **Agente Supervisor / Director Técnico IA (LLM):**
+  - Integración de modelo de inferencia ultrarrápido (Google Gemini Flash vía `GEMINI_API_KEY`).
+  - Resolución inteligente de conflictos entre nodos contradictorios (ej. nodo de asedio alcista vs nodo de rojas/lesiones bajista).
+  - Redacción de veredicto táctico natural y explicable para los suscriptores de Telegram.
+- [ ] **Arquitectura en Cascada (Gatekeeper de Costo $0 y Anti-Saturación):**
+  - Filtro local previo: el scraping y las matemáticas corren en local a costo $0 y velocidad de milisegundos.
+  - El LLM solo se invoca cuando el grafo detecta una oportunidad real de valor (+EV confirmado), limitando el tráfico a 2-5 llamadas por hora.
+  - Compatible 100% con el Free Tier de Render (la inferencia se ejecuta en la nube de Google, consumiendo <150MB de RAM en el contenedor).
+- [ ] **Comandos de Telegram Extendidos:**
+  - Comando `/analizar [partido]` para solicitar al Grafo un informe táctico profundo con IA bajo demanda.
+
 ---
 
 ## 🛠️ Tecnologías y Librerías
