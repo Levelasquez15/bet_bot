@@ -1,130 +1,75 @@
 """
-Pick Tracker — guarda cada señal enviada y rastrea su resultado.
-Almacena en picks_history.json para persistencia.
+Pick Tracker — Gestiona y rastrea el rendimiento de las señales enviadas.
+Respaldado por la base de datos relacional SQLite/PostgreSQL (src.db.repositories).
 """
-import json
+
 import logging
-import os
-import uuid
-from datetime import datetime, timezone, timedelta
-from typing import List, Optional, Dict, Any
+from typing import List, Dict, Any, Optional
+from src.db.repositories import PickRepository
 
 logger = logging.getLogger(__name__)
 
-PICKS_FILE = "picks_history.json"
-BOGOTA_TZ  = timezone(timedelta(hours=-5))
-
-
-def _now_str() -> str:
-    return datetime.now(tz=BOGOTA_TZ).strftime("%Y-%m-%d %H:%M")
-
-
-def load_picks() -> List[dict]:
-    if not os.path.exists(PICKS_FILE):
-        return []
-    try:
-        with open(PICKS_FILE, "r", encoding="utf-8") as f:
-            return json.load(f)
-    except Exception as e:
-        logger.error(f"Error leyendo picks_history.json: {e}")
-        return []
-
-
-def save_picks(picks: List[dict]) -> None:
-    try:
-        with open(PICKS_FILE, "w", encoding="utf-8") as f:
-            json.dump(picks, f, ensure_ascii=False, indent=2)
-    except Exception as e:
-        logger.error(f"Error guardando picks_history.json: {e}")
-
 
 def record_pick(pick: dict, game_id: Any, score_at_pick: str, pick_type: str = "live") -> str:
-    """
-    Registra un pick enviado. Devuelve el pick_id generado.
-    pick_type: 'live' o 'upcoming'
-    """
-    picks = load_picks()
-    pick_id = str(uuid.uuid4())[:8]
-
-    entry = {
-        "id":             pick_id,
-        "game_id":        str(game_id),
-        "match":          pick["match"],
-        "market":         pick["market"],
-        "minute":         str(pick.get("minute", "?")),
-        "score_at_pick":  score_at_pick,
-        "confidence":     pick["confidence"],
-        "reason":         pick.get("reason", ""),
-        "type":           pick_type,
-        "timestamp":      _now_str(),
-        "status":         "PENDIENTE",   # PENDIENTE | GANADO | PERDIDO | NO_VERIFICABLE
-        "final_score":    None,
-        "verified_at":    None,
-    }
-    picks.append(entry)
-    save_picks(picks)
-    logger.info(f"Pick registrado [{pick_id}]: {pick['match']} → {pick['market']}")
-    return pick_id
+    """Registra un pick en la base de datos y retorna su ID."""
+    return PickRepository.record_pick(pick, game_id, score_at_pick, pick_type)
 
 
 def update_pick_result(pick_id: str, status: str, final_score: str) -> None:
-    """Actualiza el resultado de un pick (GANADO/PERDIDO/NO_VERIFICABLE)."""
-    picks = load_picks()
-    for p in picks:
-        if p["id"] == pick_id:
-            p["status"]      = status
-            p["final_score"] = final_score
-            p["verified_at"] = _now_str()
-            break
-    save_picks(picks)
-    logger.info(f"Pick [{pick_id}] actualizado → {status} ({final_score})")
+    """Actualiza el resultado y calcula el beneficio neto."""
+    PickRepository.update_pick_result(pick_id, status, final_score)
 
 
 def get_pending_picks() -> List[dict]:
-    """Devuelve todos los picks con status PENDIENTE."""
-    return [p for p in load_picks() if p["status"] == "PENDIENTE"]
+    """Devuelve los pronósticos pendientes de verificar."""
+    raw_picks = PickRepository.get_pending_picks()
+    # Mapear nombres de columnas a la interfaz esperada por el worker
+    result = []
+    for r in raw_picks:
+        p = dict(r)
+        p["match"] = p.get("match_name", "")
+        p["timestamp"] = p.get("created_at", "")
+        p["type"] = p.get("pick_type", "live")
+        result.append(p)
+    return result
 
 
 def get_stats() -> dict:
-    """Calcula estadísticas globales."""
-    picks = load_picks()
-    total     = len(picks)
-    ganados   = sum(1 for p in picks if p["status"] == "GANADO")
-    perdidos  = sum(1 for p in picks if p["status"] == "PERDIDO")
-    pendientes= sum(1 for p in picks if p["status"] == "PENDIENTE")
-    no_verif  = sum(1 for p in picks if p["status"] == "NO_VERIFICABLE")
-    verificados = ganados + perdidos
-    efectividad = round((ganados / verificados * 100), 1) if verificados > 0 else 0.0
-
-    return {
-        "total":        total,
-        "ganados":      ganados,
-        "perdidos":     perdidos,
-        "pendientes":   pendientes,
-        "no_verif":     no_verif,
-        "efectividad":  efectividad,
-    }
+    """Calcula métricas globales de acierto y rentabilidad."""
+    return PickRepository.get_stats()
 
 
 def get_recent_picks(limit: int = 10) -> List[dict]:
-    """Devuelve los últimos N picks ordenados por más recientes."""
-    picks = load_picks()
-    return picks[-limit:][::-1]  # Más recientes primero
+    """Devuelve los últimos N picks ordenados por fecha."""
+    raw = PickRepository.get_recent_picks(limit=limit)
+    result = []
+    for r in raw:
+        p = dict(r)
+        p["match"] = p.get("match_name", "")
+        p["timestamp"] = p.get("created_at", "")
+        p["type"] = p.get("pick_type", "live")
+        result.append(p)
+    return result
 
 
 def verify_pick(pick: dict, final_home: int, final_away: int) -> str:
     """
     Determina si un pick fue GANADO, PERDIDO o NO_VERIFICABLE
     basándose en el marcador final.
+    Cubre: 1X2, Doble Oportunidad, Over/Under, BTTS y Próximo Gol.
     """
-    market = pick["market"].lower()
+    market = pick.get("market", "").lower().strip()
     total  = final_home + final_away
 
-    if "más de 2.5" in market or "over 2.5" in market:
-        return "GANADO" if total > 2 else "PERDIDO"
+    # ── 1. Mercados de Línea de Goles (Over / Under) ───────────────────────────
+    if "más de 0.5" in market or "over 0.5" in market:
+        return "GANADO" if total > 0 else "PERDIDO"
 
     if "más de 1.5" in market or "over 1.5" in market:
         return "GANADO" if total > 1 else "PERDIDO"
+
+    if "más de 2.5" in market or "over 2.5" in market:
+        return "GANADO" if total > 2 else "PERDIDO"
 
     if "más de 3.5" in market or "over 3.5" in market:
         return "GANADO" if total > 3 else "PERDIDO"
@@ -132,24 +77,48 @@ def verify_pick(pick: dict, final_home: int, final_away: int) -> str:
     if "menos de 1.5" in market or "under 1.5" in market:
         return "GANADO" if total < 2 else "PERDIDO"
 
-    if "ambos equipos marcarán: sí" in market or "btts" in market and "sí" in market:
+    if "menos de 2.5" in market or "under 2.5" in market:
+        return "GANADO" if total < 3 else "PERDIDO"
+
+    if "menos de 3.5" in market or "under 3.5" in market:
+        return "GANADO" if total < 4 else "PERDIDO"
+
+    # ── 2. Mercados 1X2 (Ganador del Partido) ───────────────────────────────────
+    if "gana local" in market:
+        return "GANADO" if final_home > final_away else "PERDIDO"
+
+    if "gana visitante" in market:
+        return "GANADO" if final_away > final_home else "PERDIDO"
+
+    if "empate" in market:
+        return "GANADO" if final_home == final_away else "PERDIDO"
+
+    # ── 3. Doble Oportunidad ──────────────────────────────────────────────────
+    if "doble oportunidad: 1x" in market or "1x" in market:
+        return "GANADO" if final_home >= final_away else "PERDIDO"
+
+    if "doble oportunidad: x2" in market or "x2" in market:
+        return "GANADO" if final_away >= final_home else "PERDIDO"
+
+    if "doble oportunidad: 12" in market or "12" in market:
+        return "GANADO" if final_home != final_away else "PERDIDO"
+
+    # ── 4. Ambos Marcan (BTTS) ────────────────────────────────────────────────
+    if ("ambos equipos marcarán: sí" in market) or ("btts" in market and "sí" in market):
         return "GANADO" if final_home > 0 and final_away > 0 else "PERDIDO"
 
-    if "ambos equipos marcarán: no" in market:
-        return "GANADO" if final_home == 0 or final_away == 0 else "PERDIDO"
+    if "ambos equipos marcarán: no" in market or ("btts" in market and "no" in market):
+        return "GANADO" if (final_home == 0 or final_away == 0) else "PERDIDO"
 
+    # ── 5. Próximo Gol (Live) ─────────────────────────────────────────────────
     if "próximo gol" in market:
-        # Si el marcador cambió desde que se enviaron el pick → GANADO
         try:
-            score_parts = pick["score_at_pick"].split("-")
+            score_parts = str(pick.get("score_at_pick", "0-0")).split("-")
             sh_at = int(score_parts[0].strip())
             sa_at = int(score_parts[1].strip())
-            total_at  = sh_at + sa_at
+            total_at = sh_at + sa_at
             return "GANADO" if total > total_at else "PERDIDO"
         except Exception:
             return "NO_VERIFICABLE"
-
-    if "córner" in market or "corner" in market:
-        return "NO_VERIFICABLE"
 
     return "NO_VERIFICABLE"

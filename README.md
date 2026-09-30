@@ -30,17 +30,17 @@ Motor inteligente de pronósticos deportivos en tiempo real para fútbol, combin
 - [x] Algoritmo generador de apuestas combinadas (Parlays de 2-3 selecciones optimizando cuota y probabilidad acumulada)
 
 ### 🔹 Módulo 3: Base de Datos y Persistencia (`src/db/`)
-- [x] Almacenamiento básico en archivos JSON planos (`subscribers.json`, `picks_history.json`)
-- [ ] Migración de archivos JSON a SQLite local / Supabase (PostgreSQL)
-- [ ] Esquema relacional: tablas de `subscribers`, `picks`, `matches`, `bankroll`
-- [ ] Operaciones transaccionales seguras sin riesgo de bloqueo o corrupción de archivos
+- [x] Base de datos relacional SQLite con modo concurrente WAL e índices optimizados
+- [x] Migración transparente y retrocompatible desde archivos JSON antiguos (`subscribers.json`, `picks_history.json`)
+- [x] Esquema relacional estructurado: tablas `subscribers`, `picks`, `parlays` y `bankroll_log`
+- [x] Repositorios desacoplados (`SubscriberRepository`, `PickRepository`, `ParlayRepository`) con bloqueos seguros de concurrencia
 
 ### 🔹 Módulo 4: Verificación de Resultados y Gestión de Bankroll (`src/worker/`)
 - [x] Tarea periódica de verificación de partidos finalizados (cada 10 min)
-- [x] Evaluación automática de mercados de goles (Over 1.5, Over 2.5, Over 3.5, BTTS)
-- [x] Notificación automática a suscriptores cuando un pick se gana o se pierde
-- [ ] Verificación de mercados de córners y tarjetas (eliminar estado `NO_VERIFICABLE`)
-- [ ] Cálculo de rentabilidad real: Unidades ganadas (+/- U), ROI / Yield %, racha actual
+- [x] Verificación matemática de mercados: 1X2, Doble Oportunidad (1X, X2, 12), Goles (0.5 a 3.5), BTTS y Próximo Gol
+- [x] Notificación automática a suscriptores con resultado y desglose de ganancia (+/- U)
+- [x] Auditoría de Bankroll: cálculo automático de Unidades Ganadas (+/- U), ROI / Yield % y Racha Actual
+- [ ] Verificación de mercados de córners y tarjetas mediante estadísticas finales avanzadas
 
 ### 🔹 Módulo 5: Bot de Telegram Interactivo (`src/bot/`)
 - [x] Comandos de administración básicos (`/start`, `/status`, `/historial`, `/stats`, `/pause`, `/resume`, `/debug`, `/debugodds`)

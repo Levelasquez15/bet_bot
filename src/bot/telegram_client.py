@@ -92,24 +92,28 @@ async def historial_command(update: Update, context: ContextTypes.DEFAULT_TYPE) 
 
 
 async def stats_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    """Muestra estadísticas de rendimiento del bot."""
+    """Muestra estadísticas completas de rendimiento y rentabilidad del bot."""
     s = get_stats()
 
     if s["total"] == 0:
         await update.message.reply_text("📭 Aún no hay picks registrados para calcular estadísticas.")
         return
 
-    bar_won  = "🟩" * min(s["ganados"],  10)
+    bar_won  = "🟩" * min(s["ganados"], 10)
     bar_lost = "🟥" * min(s["perdidos"], 10)
+    profit_emoji = "🟢" if s["net_profit"] >= 0 else "🔴"
 
     await update.message.reply_html(
-        f"📊 <b>Estadísticas del Bot</b>\n\n"
+        f"📊 <b>Estadísticas y Rentabilidad (BetBot)</b>\n\n"
         f"📦 Total picks enviados: <b>{s['total']}</b>\n\n"
         f"✅ Ganados:         <b>{s['ganados']}</b>   {bar_won}\n"
         f"❌ Perdidos:        <b>{s['perdidos']}</b>   {bar_lost}\n"
         f"⏳ Pendientes:      <b>{s['pendientes']}</b>\n"
         f"⚪ No verificables: <b>{s['no_verif']}</b>\n\n"
         f"🏆 <b>Efectividad: {s['efectividad']}%</b>\n"
+        f"{profit_emoji} <b>Beneficio Neto:</b> <code>{s['net_profit']:+.2f} U</code>\n"
+        f"📈 <b>Yield / ROI:</b> <code>{s['yield_pct']:+.1f}%</code>\n"
+        f"🔥 <b>Racha Actual:</b> <code>{s['streak']}</code>\n"
         f"<i>(sobre {s['ganados'] + s['perdidos']} picks verificados)</i>"
     )
 

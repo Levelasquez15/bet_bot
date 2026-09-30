@@ -19,6 +19,7 @@ RUN pip install --no-cache-dir -r requirements.txt
 
 COPY src ./src
 COPY telegram_bot.py ./telegram_bot.py
+RUN mkdir -p /app/data
 
 EXPOSE 8000
 

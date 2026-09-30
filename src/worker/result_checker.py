@@ -56,13 +56,23 @@ async def result_check_job(context: ContextTypes.DEFAULT_TYPE) -> None:
             update_pick_result(pick["id"], status, final_score_str)
 
             emoji = _result_emoji(status)
+            profit_str = ""
+            odd_val = float(pick.get("odd") or 1.50) if isinstance(pick.get("odd"), (int, float)) else 1.50
+            stake_val = int(pick.get("stake") or 2)
+            if status == "GANADO":
+                net = round(stake_val * (odd_val - 1.0), 2)
+                profit_str = f"\n💰 <b>Beneficio Neto:</b> <code>+{net} U</code> (Stake {stake_val})"
+            elif status == "PERDIDO":
+                profit_str = f"\n📉 <b>Balance:</b> <code>-{stake_val} U</code> (Stake {stake_val})"
+
             msg = (
                 f"{emoji} <b>RESULTADO DEL PICK</b> {emoji}\n\n"
                 f"⚽ <b>{pick['match']}</b>\n"
                 f"🎯 Predicción: {pick['market']}\n"
                 f"📊 Marcador final: <b>{final_score_str}</b>\n"
-                f"⏱️ Pick enviado en min: {pick['minute']}\n"
-                f"📈 Confianza: {pick['confidence']}%\n\n"
+                f"⏱️ Pick enviado en: {pick['minute']}\n"
+                f"📈 Confianza: {pick['confidence']}%"
+                f"{profit_str}\n\n"
                 f"Resultado: <b>{status}</b> {emoji}"
             )
 
