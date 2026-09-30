@@ -38,15 +38,16 @@ Motor inteligente de pronósticos deportivos en tiempo real para fútbol, combin
 ### 🔹 Módulo 4: Verificación de Resultados y Gestión de Bankroll (`src/worker/`)
 - [x] Tarea periódica de verificación de partidos finalizados (cada 10 min)
 - [x] Verificación matemática de mercados: 1X2, Doble Oportunidad (1X, X2, 12), Goles (0.5 a 3.5), BTTS y Próximo Gol
+- [x] Verificación de mercados de córners y tarjetas mediante estadísticas finales avanzadas de 365scores
 - [x] Notificación automática a suscriptores con resultado y desglose de ganancia (+/- U)
-- [x] Auditoría de Bankroll: cálculo automático de Unidades Ganadas (+/- U), ROI / Yield % y Racha Actual
-- [ ] Verificación de mercados de córners y tarjetas mediante estadísticas finales avanzadas
+- [x] Auditoría de Bankroll: cálculo automático de Unidades Ganadas (+/- U), ROI / Yield %, racha actual y comando `/bankroll`
 
 ### 🔹 Módulo 5: Bot de Telegram Interactivo (`src/bot/`)
 - [x] Comandos de administración básicos (`/start`, `/status`, `/historial`, `/stats`, `/pause`, `/resume`, `/debug`, `/debugodds`)
 - [x] Servidor HTTP de salud integrado en segundo plano en puerto 8000 (`/` y `/health`)
 - [x] Difusión automática de señales a suscriptores activos
 - [x] Comando `/combinada` y `/parlay` para generar un ticket inteligente bajo demanda con valor matemático
+- [x] Comando `/bankroll` para auditoría financiera en vivo con desglose por modalidad (Live vs Pre)
 - [ ] Menú interactivo con botones Inline (`InlineKeyboardMarkup`)
 - [ ] Comando interactivo `/calendario` y `/jornada` para consultar partidos por fecha
 - [ ] Preferencias personalizadas por usuario (alertas de goles, cuota mínima deseada, etc.)

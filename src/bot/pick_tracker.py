@@ -52,16 +52,59 @@ def get_recent_picks(limit: int = 10) -> List[dict]:
     return result
 
 
-def verify_pick(pick: dict, final_home: int, final_away: int) -> str:
+def verify_pick(pick: dict, final_home: int, final_away: int, stats: Optional[dict] = None) -> str:
     """
     Determina si un pick fue GANADO, PERDIDO o NO_VERIFICABLE
-    basándose en el marcador final.
-    Cubre: 1X2, Doble Oportunidad, Over/Under, BTTS y Próximo Gol.
+    basándose en el marcador final y estadísticas avanzadas del partido.
+    Cubre: Córners, Tarjetas, 1X2, Doble Oportunidad, Over/Under, BTTS y Próximo Gol.
     """
+    import re
     market = pick.get("market", "").lower().strip()
     total  = final_home + final_away
 
-    # ── 1. Mercados de Línea de Goles (Over / Under) ───────────────────────────
+    # ── 1. Córners (Estadísticas Avanzadas) ────────────────────────────────────
+    if "córner" in market or "corner" in market:
+        if stats and stats.get("has_stats"):
+            c_home = int(stats.get("corners", {}).get("home", 0))
+            c_away = int(stats.get("corners", {}).get("away", 0))
+            total_corners = c_home + c_away
+
+            m_over = re.search(r"(?:más de|over)\s+(\d+(?:\.\d+)?)", market)
+            m_under = re.search(r"(?:menos de|under)\s+(\d+(?:\.\d+)?)", market)
+
+            if m_over:
+                line = float(m_over.group(1))
+                return "GANADO" if total_corners > line else "PERDIDO"
+            elif m_under:
+                line = float(m_under.group(1))
+                return "GANADO" if total_corners < line else "PERDIDO"
+            else:
+                return "GANADO" if total_corners >= 9 else "PERDIDO"
+        return "NO_VERIFICABLE"
+
+    # ── 2. Tarjetas (Estadísticas Avanzadas) ───────────────────────────────────
+    if "tarjeta" in market or "card" in market:
+        if stats and stats.get("has_stats"):
+            y_home = int(stats.get("yellow_cards", {}).get("home", 0))
+            y_away = int(stats.get("yellow_cards", {}).get("away", 0))
+            r_home = int(stats.get("red_cards", {}).get("home", 0))
+            r_away = int(stats.get("red_cards", {}).get("away", 0))
+            total_cards = y_home + y_away + (r_home + r_away)
+
+            m_over = re.search(r"(?:más de|over)\s+(\d+(?:\.\d+)?)", market)
+            m_under = re.search(r"(?:menos de|under)\s+(\d+(?:\.\d+)?)", market)
+
+            if m_over:
+                line = float(m_over.group(1))
+                return "GANADO" if total_cards > line else "PERDIDO"
+            elif m_under:
+                line = float(m_under.group(1))
+                return "GANADO" if total_cards < line else "PERDIDO"
+            else:
+                return "GANADO" if total_cards >= 4 else "PERDIDO"
+        return "NO_VERIFICABLE"
+
+    # ── 3. Mercados de Línea de Goles (Over / Under) ───────────────────────────
     if "más de 0.5" in market or "over 0.5" in market:
         return "GANADO" if total > 0 else "PERDIDO"
 
@@ -83,7 +126,7 @@ def verify_pick(pick: dict, final_home: int, final_away: int) -> str:
     if "menos de 3.5" in market or "under 3.5" in market:
         return "GANADO" if total < 4 else "PERDIDO"
 
-    # ── 2. Mercados 1X2 (Ganador del Partido) ───────────────────────────────────
+    # ── 4. Mercados 1X2 (Ganador del Partido) ───────────────────────────────────
     if "gana local" in market:
         return "GANADO" if final_home > final_away else "PERDIDO"
 
@@ -93,7 +136,7 @@ def verify_pick(pick: dict, final_home: int, final_away: int) -> str:
     if "empate" in market:
         return "GANADO" if final_home == final_away else "PERDIDO"
 
-    # ── 3. Doble Oportunidad ──────────────────────────────────────────────────
+    # ── 5. Doble Oportunidad ──────────────────────────────────────────────────
     if "doble oportunidad: 1x" in market or "1x" in market:
         return "GANADO" if final_home >= final_away else "PERDIDO"
 
@@ -103,14 +146,14 @@ def verify_pick(pick: dict, final_home: int, final_away: int) -> str:
     if "doble oportunidad: 12" in market or "12" in market:
         return "GANADO" if final_home != final_away else "PERDIDO"
 
-    # ── 4. Ambos Marcan (BTTS) ────────────────────────────────────────────────
+    # ── 6. Ambos Marcan (BTTS) ────────────────────────────────────────────────
     if ("ambos equipos marcarán: sí" in market) or ("btts" in market and "sí" in market):
         return "GANADO" if final_home > 0 and final_away > 0 else "PERDIDO"
 
     if "ambos equipos marcarán: no" in market or ("btts" in market and "no" in market):
         return "GANADO" if (final_home == 0 or final_away == 0) else "PERDIDO"
 
-    # ── 5. Próximo Gol (Live) ─────────────────────────────────────────────────
+    # ── 7. Próximo Gol (Live) ─────────────────────────────────────────────────
     if "próximo gol" in market:
         try:
             score_parts = str(pick.get("score_at_pick", "0-0")).split("-")

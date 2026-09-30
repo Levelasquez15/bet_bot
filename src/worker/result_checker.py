@@ -52,7 +52,23 @@ async def result_check_job(context: ContextTypes.DEFAULT_TYPE) -> None:
             final_away = int(game.get("awayCompetitor", {}).get("score", 0) or 0)
             final_score_str = f"{final_home}-{final_away}"
 
-            status = verify_pick(pick, final_home, final_away)
+            # Si el mercado requiere estadísticas avanzadas (córners, tarjetas), consultarlas
+            market_lower = pick.get("market", "").lower()
+            stats = None
+            stats_extra_str = ""
+            if any(term in market_lower for term in ("córner", "corner", "tarjeta", "card")):
+                try:
+                    home_id = int(game.get("homeCompetitor", {}).get("id", 0))
+                    stats = await scraper.fetch_game_live_stats(int(game_id), home_id)
+                    if stats and stats.get("has_stats"):
+                        c_tot = stats.get("corners", {}).get("home", 0) + stats.get("corners", {}).get("away", 0)
+                        y_tot = stats.get("yellow_cards", {}).get("home", 0) + stats.get("yellow_cards", {}).get("away", 0)
+                        r_tot = stats.get("red_cards", {}).get("home", 0) + stats.get("red_cards", {}).get("away", 0)
+                        stats_extra_str = f"\n⛳ <b>Córners totales:</b> {c_tot}\n🟨 <b>Tarjetas totales:</b> {y_tot + r_tot}"
+                except Exception as e:
+                    logger.debug(f"No se pudieron obtener estadísticas avanzadas para verificar partido {game_id}: {e}")
+
+            status = verify_pick(pick, final_home, final_away, stats=stats)
             update_pick_result(pick["id"], status, final_score_str)
 
             emoji = _result_emoji(status)
@@ -69,7 +85,8 @@ async def result_check_job(context: ContextTypes.DEFAULT_TYPE) -> None:
                 f"{emoji} <b>RESULTADO DEL PICK</b> {emoji}\n\n"
                 f"⚽ <b>{pick['match']}</b>\n"
                 f"🎯 Predicción: {pick['market']}\n"
-                f"📊 Marcador final: <b>{final_score_str}</b>\n"
+                f"📊 Marcador final: <b>{final_score_str}</b>"
+                f"{stats_extra_str}\n"
                 f"⏱️ Pick enviado en: {pick['minute']}\n"
                 f"📈 Confianza: {pick['confidence']}%"
                 f"{profit_str}\n\n"

@@ -37,6 +37,7 @@ async def start_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> N
             "\n  • Verificación automática de resultados"
             "\n\n<b>Comandos disponibles:</b>"
             "\n/combinada — Genera un ticket de combinada óptima (2-3 selecciones)"
+            "\n/bankroll — Auditoría de rentabilidad y retorno de inversión"
             "\n/status — Estado del motor y métricas"
             "\n/historial — Últimos 10 picks enviados"
             "\n/stats — Tasa de acierto y efectividad"
@@ -220,6 +221,49 @@ async def combinada_command(update: Update, context: ContextTypes.DEFAULT_TYPE) 
         await scraper.close()
 
 
+async def bankroll_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Muestra un desglose completo de la gestión de bankroll y rendimiento financiero."""
+    s = get_stats()
+    if s["total"] == 0:
+        await update.message.reply_text("📭 Aún no hay pronósticos registrados en la base de datos.")
+        return
+
+    profit_emoji = "🟢" if s["net_profit"] >= 0 else "🔴"
+
+    from src.db.database import db
+    type_stats = []
+    with db.get_connection() as conn:
+        cur = conn.cursor()
+        cur.execute("""
+        SELECT pick_type, COUNT(*) as cnt, SUM(profit_units) as profit
+        FROM picks
+        WHERE status IN ('GANADO', 'PERDIDO')
+        GROUP BY pick_type
+        """)
+        type_stats = cur.fetchall()
+
+    lines = [
+        "💼 <b>AUDITORÍA DE BANKROLL Y RENTABILIDAD</b> 💼\n",
+        f"💰 <b>Total Apostado:</b> <code>{s['total_staked']} U</code>",
+        f"{profit_emoji} <b>Beneficio Neto:</b> <code>{s['net_profit']:+.2f} U</code>",
+        f"📈 <b>Yield (ROI Real):</b> <code>{s['yield_pct']:+.1f}%</code>",
+        f"🎯 <b>Winrate:</b> <code>{s['efectividad']}%</code> ({s['ganados']}W - {s['perdidos']}L)",
+        f"🔥 <b>Racha Actual:</b> <code>{s['streak']}</code>",
+        f"⏳ <b>Picks en Juego:</b> <code>{s['pendientes']}</code>\n",
+    ]
+
+    if type_stats:
+        lines.append("📊 <b>Rendimiento por Modalidad:</b>")
+        for row in type_stats:
+            p_type = "🔴 En Vivo (Live)" if row["pick_type"] == "live" else "📅 Pre-Partido"
+            p_prof = row["profit"] or 0.0
+            p_emoji = "🟩" if p_prof >= 0 else "🟥"
+            lines.append(f"  • {p_type}: <b>{row['cnt']} picks</b> | {p_emoji} <code>{p_prof:+.2f} U</code>")
+
+    lines.append("\n💡 <i>Cálculos basados en el Criterio de Kelly y cuotas validadas en tiempo real.</i>")
+    await update.message.reply_html("\n".join(lines))
+
+
 def create_application() -> Application:
     token = os.getenv("TELEGRAM_TOKEN") or os.getenv("TELEGRAM_BOT_TOKEN")
     if not token:
@@ -230,6 +274,7 @@ def create_application() -> Application:
     app.add_handler(CommandHandler("status",    status_command))
     app.add_handler(CommandHandler("combinada", combinada_command))
     app.add_handler(CommandHandler("parlay",    combinada_command))
+    app.add_handler(CommandHandler("bankroll",  bankroll_command))
     app.add_handler(CommandHandler("historial", historial_command))
     app.add_handler(CommandHandler("stats",     stats_command))
     app.add_handler(CommandHandler("pause",     pause_command))
