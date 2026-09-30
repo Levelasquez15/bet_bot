@@ -1,12 +1,23 @@
+"""
+Cliente de Telegram para BetBot.
+Incluye comandos interactivos, botones Inline, menú de preferencias y control de bankroll.
+"""
+
 import logging
 import os
-from telegram import Update
-from telegram.ext import Application, CommandHandler, ContextTypes
-from src.bot.subscribers import add_subscriber, get_subscribers, set_paused
+import json
+from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
+from telegram.ext import Application, CommandHandler, CallbackQueryHandler, ContextTypes
+
+from src.bot.subscribers import (
+    add_subscriber, get_subscribers, set_paused,
+    get_subscriber_data, update_subscriber_prefs
+)
 from src.bot.pick_tracker import get_stats, get_recent_picks
 from src.scraper.scraper_365 import Scraper365
 from src.analyzer.logic_tree import LogicTreeAnalyzer
 from src.analyzer.combinadas import generate_best_parlay, format_parlay_message
+from src.db.database import db
 
 logger = logging.getLogger(__name__)
 
@@ -18,104 +29,317 @@ STATUS_EMOJI = {
 }
 
 
+def get_main_menu_keyboard() -> InlineKeyboardMarkup:
+    """Genera la botonera táctil principal para la navegación de los usuarios."""
+    return InlineKeyboardMarkup([
+        [
+            InlineKeyboardButton("🎰 Armar Combinada", callback_data="btn_combinada"),
+            InlineKeyboardButton("💼 Mi Bankroll & ROI", callback_data="btn_bankroll"),
+        ],
+        [
+            InlineKeyboardButton("📊 Estadísticas", callback_data="btn_stats"),
+            InlineKeyboardButton("📋 Últimos Picks", callback_data="btn_historial"),
+        ],
+        [
+            InlineKeyboardButton("⚽ Partidos En Vivo", callback_data="btn_live"),
+            InlineKeyboardButton("📅 Próximos Partidos", callback_data="btn_upcoming"),
+        ],
+        [
+            InlineKeyboardButton("⚙️ Mis Preferencias", callback_data="btn_prefs"),
+            InlineKeyboardButton("🔄 Estado del Bot", callback_data="btn_status"),
+        ]
+    ])
+
+
+def get_prefs_keyboard(chat_id: int) -> InlineKeyboardMarkup:
+    """Genera la botonera interactiva para alternar preferencias de alertas."""
+    sub = get_subscriber_data(chat_id) or {}
+    live_on = sub.get("notify_live", 1) == 1
+    upcoming_on = sub.get("notify_upcoming", 1) == 1
+    is_paused = sub.get("is_paused", 0) == 1
+
+    live_text = "🟢 Live: Activado" if live_on else "🔴 Live: Desactivado"
+    upcoming_text = "🟢 Pre-Partido: Activado" if upcoming_on else "🔴 Pre-Partido: Desactivado"
+    pause_text = "🔇 Estado: Pausado" if is_paused else "🔊 Estado: Recibiendo Alertas"
+
+    return InlineKeyboardMarkup([
+        [InlineKeyboardButton(live_text, callback_data="toggle_live")],
+        [InlineKeyboardButton(upcoming_text, callback_data="toggle_upcoming")],
+        [InlineKeyboardButton(pause_text, callback_data="toggle_pause")],
+        [InlineKeyboardButton("🔙 Volver al Menú Principal", callback_data="btn_main_menu")]
+    ])
+
+
+def get_back_keyboard() -> InlineKeyboardMarkup:
+    """Botón sencillo para regresar al menú principal."""
+    return InlineKeyboardMarkup([
+        [InlineKeyboardButton("🔙 Volver al Menú Principal", callback_data="btn_main_menu")]
+    ])
+
+
+# ── Comandos Principales ───────────────────────────────────────────────────────
+
 async def start_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     user    = update.effective_user
     chat_id = update.effective_chat.id
-    is_new  = add_subscriber(chat_id)
+    is_new  = add_subscriber(chat_id, username=user.username, first_name=user.first_name)
 
-    if is_new:
-        logger.info(f"Nuevo suscriptor: {chat_id} ({user.full_name})")
-        await update.message.reply_html(
-            rf"¡Hola {user.mention_html()}! Soy 365BetBot. 🤖"
-            "\n\n✅ <b>¡Registrado con éxito!</b>"
-            "\nRecibirás alertas de partidos <b>en vivo</b> y <b>próximos</b> con Valor Esperado (+EV)."
-            "\n\n📊 Tecnología:"
-            "\n  • 8 árboles de decisión con estadísticas en vivo (posesión, xG, remates)"
-            "\n  • Modelo Poisson bivariado + Ranking Elo de clubes"
-            "\n  • Value Betting matemático & Criterio de Kelly"
-            "\n  • Generador inteligente de combinadas / parlays"
-            "\n  • Verificación automática de resultados"
-            "\n\n<b>Comandos disponibles:</b>"
-            "\n/combinada — Genera un ticket de combinada óptima (2-3 selecciones)"
-            "\n/bankroll — Auditoría de rentabilidad y retorno de inversión"
-            "\n/status — Estado del motor y métricas"
-            "\n/historial — Últimos 10 picks enviados"
-            "\n/stats — Tasa de acierto y efectividad"
-            "\n/pause — Pausa las notificaciones"
-            "\n/resume — Reactiva las notificaciones"
-            "\n/debug — Datos en tiempo real del scraper"
-        )
-    else:
-        await update.message.reply_html(
-            rf"¡Hola de nuevo {user.mention_html()}! 👋"
-            "\n\nYa estás registrado. Sigo analizando partidos continuamente. 🔄"
-            "\nUsa /combinada para un ticket inmediato o /stats para ver el rendimiento. 🎯"
-        )
-    set_paused(chat_id, False)
+    welcome_text = (
+        rf"¡Hola {user.mention_html()}! Soy <b>BetBot AI</b> 🤖⚽"
+        "\n\nTu asistente inteligente de pronósticos deportivos con <b>Valor Esperado (+EV)</b>."
+        "\n\n📊 <b>Tecnología Activa:</b>"
+        "\n  • 8 árboles heurísticos con stats en vivo (xG, tiros a puerta, córners)"
+        "\n  • Modelo matemático Poisson bivariado + Calibración Elo de clubes"
+        "\n  • Value Betting matemático & Gestión de Stake con Criterio de Kelly"
+        "\n  • Generador inteligente de apuestas combinadas (Parlays)"
+        "\n  • Verificación y auditoría de balance relacional en SQLite"
+        "\n\n👇 <i>Selecciona una opción del panel interactivo para comenzar:</i>"
+    )
+
+    await update.message.reply_html(welcome_text, reply_markup=get_main_menu_keyboard())
+
+
+async def menu_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Abre el panel táctil interactivo."""
+    await update.message.reply_html(
+        "📱 <b>PANEL DE CONTROL INTERACTIVO</b> 📱\n"
+        "Elige qué deseas consultar:",
+        reply_markup=get_main_menu_keyboard()
+    )
 
 
 async def status_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     subs  = get_subscribers()
     stats = get_stats()
-    await update.message.reply_html(
+    text = (
         "📊 <b>Estado del Motor BetBot</b>\n\n"
-        "✅ Scraping 365scores: ACTIVO\n"
-        "✅ Análisis en Vivo (8 árboles con stats avanzadas): ACTIVO\n"
-        "✅ Análisis Próximos (Poisson + Elo + Value Betting): ACTIVO\n"
-        "✅ Generador de Combinadas / Parlays: ACTIVO\n"
-        "✅ Verificación automática de resultados: ACTIVO\n"
-        f"👥 Suscriptores: {len(subs)}\n"
-        f"📈 Picks totales enviados: {stats['total']}\n"
+        "✅ Ingestión 365scores: ACTIVO\n"
+        "✅ Análisis en Vivo (Stats xG + Tiros + Córners): ACTIVO\n"
+        "✅ Análisis Próximos (Poisson + Elo + Kelly): ACTIVO\n"
+        "✅ Generador de Combinadas (+EV): ACTIVO\n"
+        "✅ Base de Datos Relacional SQLite WAL: ACTIVO\n"
+        "✅ Verificación de Resultados: ACTIVO\n"
+        f"👥 Suscriptores Registrados: {len(subs)}\n"
+        f"📈 Pronósticos Totales: {stats['total']}\n"
         f"🏆 Efectividad: {stats['efectividad']}%\n"
-        "⏱️ Ciclos: 2min (señales) | 10min (resultados)"
+        "⏱️ Ciclos: 2min (escaneo) | 10min (verificación)"
     )
+    if update.callback_query:
+        await update.callback_query.edit_message_text(text, parse_mode="HTML", reply_markup=get_back_keyboard())
+    else:
+        await update.message.reply_html(text, reply_markup=get_back_keyboard())
 
 
 async def historial_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     """Muestra los últimos 10 picks con su resultado."""
     picks = get_recent_picks(limit=10)
     if not picks:
-        await update.message.reply_text("📭 Aún no hay picks en el historial.")
-        return
+        msg = "📭 Aún no hay picks en el historial."
+    else:
+        lines = ["📋 <b>Últimos 10 Picks Registrados</b>\n"]
+        for p in picks:
+            emoji  = STATUS_EMOJI.get(p["status"], "❓")
+            tipo   = "🔴 LIVE" if p.get("type") == "live" else "📅 PRE"
+            score  = f" → Final: {p['final_score']}" if p.get("final_score") else ""
+            odd_str = f" [@ {p['odd']}]" if p.get("odd") else ""
+            lines.append(
+                f"{emoji} [{tipo}] <b>{p['match']}</b>\n"
+                f"   🎯 {p['market']}{odd_str}\n"
+                f"   ⏱️ {p['timestamp']}{score}\n"
+            )
+        msg = "\n".join(lines)
 
-    lines = ["📋 <b>Últimos 10 Picks</b>\n"]
-    for p in picks:
-        emoji  = STATUS_EMOJI.get(p["status"], "❓")
-        tipo   = "🔴 LIVE" if p["type"] == "live" else "📅 PRE"
-        score  = f" → Final: {p['final_score']}" if p["final_score"] else ""
-        lines.append(
-            f"{emoji} [{tipo}] <b>{p['match']}</b>\n"
-            f"   🎯 {p['market']}\n"
-            f"   {p['timestamp']}{score}\n"
-        )
-
-    await update.message.reply_html("\n".join(lines))
+    if update.callback_query:
+        await update.callback_query.edit_message_text(msg, parse_mode="HTML", reply_markup=get_back_keyboard())
+    else:
+        await update.message.reply_html(msg, reply_markup=get_back_keyboard())
 
 
 async def stats_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    """Muestra estadísticas completas de rendimiento y rentabilidad del bot."""
+    """Muestra estadísticas completas de rendimiento y rentabilidad."""
     s = get_stats()
 
     if s["total"] == 0:
-        await update.message.reply_text("📭 Aún no hay picks registrados para calcular estadísticas.")
+        msg = "📭 Aún no hay picks registrados para calcular estadísticas."
+    else:
+        bar_won  = "🟩" * min(s["ganados"], 10)
+        bar_lost = "🟥" * min(s["perdidos"], 10)
+        profit_emoji = "🟢" if s["net_profit"] >= 0 else "🔴"
+
+        msg = (
+            f"📊 <b>Estadísticas y Rentabilidad (BetBot)</b>\n\n"
+            f"📦 Total picks enviados: <b>{s['total']}</b>\n\n"
+            f"✅ Ganados:         <b>{s['ganados']}</b>   {bar_won}\n"
+            f"❌ Perdidos:        <b>{s['perdidos']}</b>   {bar_lost}\n"
+            f"⏳ Pendientes:      <b>{s['pendientes']}</b>\n"
+            f"⚪ No verificables: <b>{s['no_verif']}</b>\n\n"
+            f"🏆 <b>Efectividad: {s['efectividad']}%</b>\n"
+            f"{profit_emoji} <b>Beneficio Neto:</b> <code>{s['net_profit']:+.2f} U</code>\n"
+            f"📈 <b>Yield / ROI:</b> <code>{s['yield_pct']:+.1f}%</code>\n"
+            f"🔥 <b>Racha Actual:</b> <code>{s['streak']}</code>\n"
+            f"<i>(sobre {s['ganados'] + s['perdidos']} picks verificados)</i>"
+        )
+
+    if update.callback_query:
+        await update.callback_query.edit_message_text(msg, parse_mode="HTML", reply_markup=get_back_keyboard())
+    else:
+        await update.message.reply_html(msg, reply_markup=get_back_keyboard())
+
+
+async def bankroll_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Muestra un desglose completo de la gestión de bankroll y rendimiento financiero."""
+    s = get_stats()
+    if s["total"] == 0:
+        msg = "📭 Aún no hay pronósticos registrados en la base de datos."
+        if update.callback_query:
+            await update.callback_query.edit_message_text(msg, reply_markup=get_back_keyboard())
+        else:
+            await update.message.reply_text(msg, reply_markup=get_back_keyboard())
         return
 
-    bar_won  = "🟩" * min(s["ganados"], 10)
-    bar_lost = "🟥" * min(s["perdidos"], 10)
     profit_emoji = "🟢" if s["net_profit"] >= 0 else "🔴"
 
+    type_stats = []
+    with db.get_connection() as conn:
+        cur = conn.cursor()
+        cur.execute("""
+        SELECT pick_type, COUNT(*) as cnt, SUM(profit_units) as profit
+        FROM picks
+        WHERE status IN ('GANADO', 'PERDIDO')
+        GROUP BY pick_type
+        """)
+        type_stats = cur.fetchall()
+
+    lines = [
+        "💼 <b>AUDITORÍA DE BANKROLL Y RENTABILIDAD</b> 💼\n",
+        f"💰 <b>Total Apostado:</b> <code>{s['total_staked']} U</code>",
+        f"{profit_emoji} <b>Beneficio Neto:</b> <code>{s['net_profit']:+.2f} U</code>",
+        f"📈 <b>Yield (ROI Real):</b> <code>{s['yield_pct']:+.1f}%</code>",
+        f"🎯 <b>Winrate:</b> <code>{s['efectividad']}%</code> ({s['ganados']}W - {s['perdidos']}L)",
+        f"🔥 <b>Racha Actual:</b> <code>{s['streak']}</code>",
+        f"⏳ <b>Picks en Juego:</b> <code>{s['pendientes']}</code>\n",
+    ]
+
+    if type_stats:
+        lines.append("📊 <b>Rendimiento por Modalidad:</b>")
+        for row in type_stats:
+            p_type = "🔴 En Vivo (Live)" if row["pick_type"] == "live" else "📅 Pre-Partido"
+            p_prof = row["profit"] or 0.0
+            p_emoji = "🟩" if p_prof >= 0 else "🟥"
+            lines.append(f"  • {p_type}: <b>{row['cnt']} picks</b> | {p_emoji} <code>{p_prof:+.2f} U</code>")
+
+    lines.append("\n💡 <i>Cálculos basados en el Criterio de Kelly y cuotas validadas en tiempo real.</i>")
+    msg = "\n".join(lines)
+
+    if update.callback_query:
+        await update.callback_query.edit_message_text(msg, parse_mode="HTML", reply_markup=get_back_keyboard())
+    else:
+        await update.message.reply_html(msg, reply_markup=get_back_keyboard())
+
+
+async def combinada_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Genera en tiempo real un ticket de apuesta combinada optimizada con Valor Esperado."""
+    if update.callback_query:
+        await update.callback_query.edit_message_text("🎰 Calculando la mejor combinada con valor matemático... un momento.")
+    else:
+        await update.message.reply_text("🎰 Calculando la mejor combinada con valor matemático... un momento.")
+
+    scraper = Scraper365()
+    analyzer = LogicTreeAnalyzer()
+    try:
+        upcoming_games = await scraper.fetch_upcoming_matches(hours_ahead=24, filter_leagues=True)
+        if not upcoming_games:
+            msg = "❌ No hay partidos programados en las próximas 24 horas."
+        else:
+            picks = analyzer.analyze_upcoming(upcoming_games)
+            if len(picks) < 2:
+                msg = (
+                    f"⚠️ Solo se encontraron {len(picks)} selecciones con Valor Esperado positivo (+EV). "
+                    "Se requieren al menos 2 partidos para armar una combinada."
+                )
+            else:
+                parlay = generate_best_parlay(picks, legs=min(3, len(picks)))
+                if not parlay:
+                    msg = "⚠️ No se encontró una combinación que cumpla con los filtros de cuota (2.0 a 6.0) y probabilidad acumulada."
+                else:
+                    msg = format_parlay_message(parlay)
+
+        if update.callback_query:
+            await update.callback_query.edit_message_text(msg, parse_mode="HTML", reply_markup=get_back_keyboard())
+        else:
+            await update.message.reply_html(msg, reply_markup=get_back_keyboard())
+
+    except Exception as e:
+        logger.error(f"Error generando combinada: {e}", exc_info=True)
+        err_msg = f"❌ Error calculando combinada: {e}"
+        if update.callback_query:
+            await update.callback_query.edit_message_text(err_msg, reply_markup=get_back_keyboard())
+        else:
+            await update.message.reply_text(err_msg, reply_markup=get_back_keyboard())
+    finally:
+        await scraper.close()
+
+
+async def jornada_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Muestra el calendario de partidos monitoreados para hoy y en vivo."""
+    scraper = Scraper365()
+    try:
+        live = await scraper.fetch_live_matches(filter_leagues=True, fetch_stats=False)
+        upcoming = await scraper.fetch_upcoming_matches(hours_ahead=12, filter_leagues=True)
+
+        lines = ["📅 <b>JORNADA DE FÚTBOL MONITOREADA HOY</b> 📅\n"]
+
+        if live:
+            lines.append("🔴 <b>PARTIDOS EN VIVO AHORA:</b>")
+            for g in live[:6]:
+                h = g.get("homeCompetitor", {}).get("name", "")
+                a = g.get("awayCompetitor", {}).get("name", "")
+                sh = g.get("homeCompetitor", {}).get("score", 0)
+                sa = g.get("awayCompetitor", {}).get("score", 0)
+                min_str = g.get("gameTimeDisplay", "Live")
+                lines.append(f"  • {h} {sh}-{sa} {a} ⏱️ ({min_str}')")
+            lines.append("")
+
+        if upcoming:
+            lines.append("⏳ <b>PRÓXIMOS DESTACADOS:</b>")
+            for g in upcoming[:8]:
+                h = g.get("homeCompetitor", {}).get("name", "")
+                a = g.get("awayCompetitor", {}).get("name", "")
+                st = g.get("startTime", "")[11:16] if g.get("startTime") else "Hoy"
+                lines.append(f"  • <b>{h} vs {a}</b> 🕐 {st}")
+        else:
+            lines.append("Sin más partidos programados en las próximas 12 horas.")
+
+        msg = "\n".join(lines)
+        if update.callback_query:
+            await update.callback_query.edit_message_text(msg, parse_mode="HTML", reply_markup=get_back_keyboard())
+        else:
+            await update.message.reply_html(msg, reply_markup=get_back_keyboard())
+    except Exception as e:
+        logger.error(f"Error en jornada_command: {e}", exc_info=True)
+        if update.callback_query:
+            await update.callback_query.edit_message_text(f"❌ Error consultando jornada: {e}", reply_markup=get_back_keyboard())
+        else:
+            await update.message.reply_text(f"❌ Error consultando jornada: {e}")
+    finally:
+        await scraper.close()
+
+
+async def pause_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    chat_id = update.effective_chat.id
+    set_paused(chat_id, True)
     await update.message.reply_html(
-        f"📊 <b>Estadísticas y Rentabilidad (BetBot)</b>\n\n"
-        f"📦 Total picks enviados: <b>{s['total']}</b>\n\n"
-        f"✅ Ganados:         <b>{s['ganados']}</b>   {bar_won}\n"
-        f"❌ Perdidos:        <b>{s['perdidos']}</b>   {bar_lost}\n"
-        f"⏳ Pendientes:      <b>{s['pendientes']}</b>\n"
-        f"⚪ No verificables: <b>{s['no_verif']}</b>\n\n"
-        f"🏆 <b>Efectividad: {s['efectividad']}%</b>\n"
-        f"{profit_emoji} <b>Beneficio Neto:</b> <code>{s['net_profit']:+.2f} U</code>\n"
-        f"📈 <b>Yield / ROI:</b> <code>{s['yield_pct']:+.1f}%</code>\n"
-        f"🔥 <b>Racha Actual:</b> <code>{s['streak']}</code>\n"
-        f"<i>(sobre {s['ganados'] + s['perdidos']} picks verificados)</i>"
+        "🔇 <b>Bot Pausado.</b>\nYa no recibirás alertas de apuestas. Usa /resume o el menú para reactivar.",
+        reply_markup=get_main_menu_keyboard()
+    )
+
+
+async def resume_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    chat_id = update.effective_chat.id
+    set_paused(chat_id, False)
+    await update.message.reply_html(
+        "🔊 <b>Bot Reactivado.</b>\nVuelves a estar en la lista prioritaria para recibir picks.",
+        reply_markup=get_main_menu_keyboard()
     )
 
 
@@ -151,16 +375,6 @@ async def debug_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> N
         await scraper.close()
 
 
-async def pause_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    chat_id = update.effective_chat.id
-    set_paused(chat_id, True)
-    await update.message.reply_html("🔇 <b>Bot Pausado.</b>\nYa no recibirás alertas de apuestas. Usa /resume para reactivar.")
-
-async def resume_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    chat_id = update.effective_chat.id
-    set_paused(chat_id, False)
-    await update.message.reply_html("🔊 <b>Bot Reactivado.</b>\nVuelves a estar en la lista prioritaria para recibir picks.")
-
 async def debugodds_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     await update.message.reply_text("🔍 Extrayendo el JSON de un partido con cuotas para análisis... un momento.")
     scraper = Scraper365()
@@ -168,7 +382,6 @@ async def debugodds_command(update: Update, context: ContextTypes.DEFAULT_TYPE) 
         games = await scraper.fetch_live_matches()
         game_con_cuotas = next((g for g in games if "odds" in g or "bookmakers" in g), None)
         if game_con_cuotas:
-            import json
             bookmakers = game_con_cuotas.get("bookmakers", [])
             odds = game_con_cuotas.get("odds", {})
             report = {
@@ -177,92 +390,82 @@ async def debugodds_command(update: Update, context: ContextTypes.DEFAULT_TYPE) 
                 "bookmakers_key": bookmakers
             }
             json_text = json.dumps(report, ensure_ascii=False, indent=2)
-            # Limpiar longitud
             if len(json_text) > 3000:
                 json_text = json_text[:3000] + "\n...[TRUNCATED]"
             await update.message.reply_html(f"<b>RAW JSON (Cuotas):</b>\n<pre>{json_text}</pre>")
         else:
-            await update.message.reply_text("❌ No encontré ningún partido en vivo con nodo 'odds' o 'bookmakers' en este instante.")
+            await update.message.reply_text("❌ No encontré ningún partido en vivo con cuotas en este instante.")
     except Exception as e:
         await update.message.reply_text(f"❌ Error en debugodds: {e}")
     finally:
         await scraper.close()
 
-async def combinada_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    """Genera en tiempo real un ticket de apuesta combinada optimizada con Valor Esperado."""
-    await update.message.reply_text("🎰 Calculando la mejor combinada con valor matemático... un momento.")
-    scraper = Scraper365()
-    analyzer = LogicTreeAnalyzer()
-    try:
-        upcoming_games = await scraper.fetch_upcoming_matches(hours_ahead=24, filter_leagues=True)
-        if not upcoming_games:
-            await update.message.reply_text("❌ No hay partidos programados en las próximas 24 horas.")
-            return
 
-        picks = analyzer.analyze_upcoming(upcoming_games)
-        if len(picks) < 2:
-            await update.message.reply_text(
-                f"⚠️ Solo se encontraron {len(picks)} selecciones con Valor Esperado positivo (+EV). "
-                "Se requieren al menos 2 partidos para armar una combinada."
-            )
-            return
+# ── Manejador de Botones Táctiles (Callback Queries) ──────────────────────────
 
-        parlay = generate_best_parlay(picks, legs=min(3, len(picks)))
-        if not parlay:
-            await update.message.reply_text("⚠️ No se encontró una combinación que cumpla con los filtros de cuota (2.0 a 6.0) y probabilidad acumulada.")
-            return
+async def button_callback_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Gestiona los toques en los botones InlineKeyboardMarkup."""
+    query = update.callback_query
+    await query.answer()
 
-        msg = format_parlay_message(parlay)
-        await update.message.reply_html(msg)
-    except Exception as e:
-        logger.error(f"Error generando combinada: {e}", exc_info=True)
-        await update.message.reply_text(f"❌ Error calculando combinada: {e}")
-    finally:
-        await scraper.close()
+    data = query.data
+    chat_id = query.message.chat_id
+
+    if data == "btn_main_menu":
+        await query.edit_message_text(
+            "📱 <b>PANEL DE CONTROL PRINCIPAL</b> 📱\n"
+            "Elige la opción que deseas consultar:",
+            parse_mode="HTML",
+            reply_markup=get_main_menu_keyboard()
+        )
+
+    elif data == "btn_combinada":
+        await combinada_command(update, context)
+
+    elif data == "btn_bankroll":
+        await bankroll_command(update, context)
+
+    elif data == "btn_stats":
+        await stats_command(update, context)
+
+    elif data == "btn_historial":
+        await historial_command(update, context)
+
+    elif data == "btn_live" or data == "btn_upcoming":
+        await jornada_command(update, context)
+
+    elif data == "btn_status":
+        await status_command(update, context)
+
+    elif data == "btn_prefs":
+        await query.edit_message_text(
+            "⚙️ <b>CONFIGURACIÓN DE ALERTAS PERSONALES</b> ⚙️\n\n"
+            "Personaliza qué tipo de notificaciones deseas recibir en tiempo real.\n"
+            "Toca cada botón para activar o desactivar:",
+            parse_mode="HTML",
+            reply_markup=get_prefs_keyboard(chat_id)
+        )
+
+    elif data == "toggle_live":
+        sub = get_subscriber_data(chat_id) or {}
+        curr = sub.get("notify_live", 1)
+        update_subscriber_prefs(chat_id, notify_live=0 if curr == 1 else 1)
+        await query.edit_message_reply_markup(reply_markup=get_prefs_keyboard(chat_id))
+
+    elif data == "toggle_upcoming":
+        sub = get_subscriber_data(chat_id) or {}
+        curr = sub.get("notify_upcoming", 1)
+        update_subscriber_prefs(chat_id, notify_upcoming=0 if curr == 1 else 1)
+        await query.edit_message_reply_markup(reply_markup=get_prefs_keyboard(chat_id))
+
+    elif data == "toggle_pause":
+        sub = get_subscriber_data(chat_id) or {}
+        curr = sub.get("is_paused", 0)
+        set_paused(chat_id, False if curr == 1 else True)
+        await query.edit_message_reply_markup(reply_markup=get_prefs_keyboard(chat_id))
 
 
-async def bankroll_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    """Muestra un desglose completo de la gestión de bankroll y rendimiento financiero."""
-    s = get_stats()
-    if s["total"] == 0:
-        await update.message.reply_text("📭 Aún no hay pronósticos registrados en la base de datos.")
-        return
-
-    profit_emoji = "🟢" if s["net_profit"] >= 0 else "🔴"
-
-    from src.db.database import db
-    type_stats = []
-    with db.get_connection() as conn:
-        cur = conn.cursor()
-        cur.execute("""
-        SELECT pick_type, COUNT(*) as cnt, SUM(profit_units) as profit
-        FROM picks
-        WHERE status IN ('GANADO', 'PERDIDO')
-        GROUP BY pick_type
-        """)
-        type_stats = cur.fetchall()
-
-    lines = [
-        "💼 <b>AUDITORÍA DE BANKROLL Y RENTABILIDAD</b> 💼\n",
-        f"💰 <b>Total Apostado:</b> <code>{s['total_staked']} U</code>",
-        f"{profit_emoji} <b>Beneficio Neto:</b> <code>{s['net_profit']:+.2f} U</code>",
-        f"📈 <b>Yield (ROI Real):</b> <code>{s['yield_pct']:+.1f}%</code>",
-        f"🎯 <b>Winrate:</b> <code>{s['efectividad']}%</code> ({s['ganados']}W - {s['perdidos']}L)",
-        f"🔥 <b>Racha Actual:</b> <code>{s['streak']}</code>",
-        f"⏳ <b>Picks en Juego:</b> <code>{s['pendientes']}</code>\n",
-    ]
-
-    if type_stats:
-        lines.append("📊 <b>Rendimiento por Modalidad:</b>")
-        for row in type_stats:
-            p_type = "🔴 En Vivo (Live)" if row["pick_type"] == "live" else "📅 Pre-Partido"
-            p_prof = row["profit"] or 0.0
-            p_emoji = "🟩" if p_prof >= 0 else "🟥"
-            lines.append(f"  • {p_type}: <b>{row['cnt']} picks</b> | {p_emoji} <code>{p_prof:+.2f} U</code>")
-
-    lines.append("\n💡 <i>Cálculos basados en el Criterio de Kelly y cuotas validadas en tiempo real.</i>")
-    await update.message.reply_html("\n".join(lines))
-
+# ── Constructor de la Aplicación ───────────────────────────────────────────────
 
 def create_application() -> Application:
     token = os.getenv("TELEGRAM_TOKEN") or os.getenv("TELEGRAM_BOT_TOKEN")
@@ -270,16 +473,24 @@ def create_application() -> Application:
         raise ValueError("No se encontró TELEGRAM_TOKEN ni TELEGRAM_BOT_TOKEN en el entorno.")
 
     app = Application.builder().token(token).build()
+
+    # Comandos
     app.add_handler(CommandHandler("start",     start_command))
+    app.add_handler(CommandHandler("menu",      menu_command))
     app.add_handler(CommandHandler("status",    status_command))
     app.add_handler(CommandHandler("combinada", combinada_command))
     app.add_handler(CommandHandler("parlay",    combinada_command))
     app.add_handler(CommandHandler("bankroll",  bankroll_command))
     app.add_handler(CommandHandler("historial", historial_command))
     app.add_handler(CommandHandler("stats",     stats_command))
+    app.add_handler(CommandHandler("jornada",   jornada_command))
+    app.add_handler(CommandHandler("partidos",  jornada_command))
     app.add_handler(CommandHandler("pause",     pause_command))
     app.add_handler(CommandHandler("resume",    resume_command))
     app.add_handler(CommandHandler("debug",     debug_command))
     app.add_handler(CommandHandler("debugodds", debugodds_command))
+
+    # Manejador de botones táctiles
+    app.add_handler(CallbackQueryHandler(button_callback_handler))
 
     return app

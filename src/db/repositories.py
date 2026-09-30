@@ -72,6 +72,58 @@ class SubscriberRepository:
             return {r["chat_id"] for r in rows}
 
     @staticmethod
+    def get_subscriber(chat_id: int) -> Optional[dict]:
+        """Obtiene los datos y preferencias configuradas de un suscriptor."""
+        with db.get_connection() as conn:
+            cursor = conn.cursor()
+            cursor.execute("SELECT * FROM subscribers WHERE chat_id = ?", (chat_id,))
+            row = cursor.fetchone()
+            return dict(row) if row else None
+
+    @staticmethod
+    def update_prefs(
+        chat_id: int,
+        notify_live: Optional[int] = None,
+        notify_upcoming: Optional[int] = None,
+        min_odd: Optional[float] = None
+    ) -> Optional[dict]:
+        """Actualiza las preferencias de alertas de un suscriptor."""
+        now = now_str()
+        with db.get_connection() as conn:
+            cursor = conn.cursor()
+            cursor.execute("SELECT * FROM subscribers WHERE chat_id = ?", (chat_id,))
+            row = cursor.fetchone()
+            if not row:
+                return None
+
+            new_live = notify_live if notify_live is not None else row["notify_live"]
+            new_upcoming = notify_upcoming if notify_upcoming is not None else row["notify_upcoming"]
+            new_min_odd = min_odd if min_odd is not None else row["min_odd"]
+
+            cursor.execute("""
+            UPDATE subscribers
+            SET notify_live = ?, notify_upcoming = ?, min_odd = ?, updated_at = ?
+            WHERE chat_id = ?
+            """, (new_live, new_upcoming, new_min_odd, now, chat_id))
+
+            cursor.execute("SELECT * FROM subscribers WHERE chat_id = ?", (chat_id,))
+            return dict(cursor.fetchone())
+
+    @staticmethod
+    def get_active_subscribers_for_type(pick_type: str = "live") -> Set[int]:
+        """Devuelve chat_ids activos que desean recibir este tipo de señal ('live' o 'upcoming')."""
+        with db.get_connection() as conn:
+            cursor = conn.cursor()
+            if pick_type == "live":
+                cursor.execute("SELECT chat_id FROM subscribers WHERE is_paused = 0 AND notify_live = 1")
+            elif pick_type == "upcoming":
+                cursor.execute("SELECT chat_id FROM subscribers WHERE is_paused = 0 AND notify_upcoming = 1")
+            else:
+                cursor.execute("SELECT chat_id FROM subscribers WHERE is_paused = 0")
+            rows = cursor.fetchall()
+            return {r["chat_id"] for r in rows}
+
+    @staticmethod
     def get_all_subscribers() -> Set[int]:
         """Devuelve un set con todos los chat_ids registrados en la base de datos."""
         with db.get_connection() as conn:

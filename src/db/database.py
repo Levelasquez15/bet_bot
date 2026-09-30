@@ -70,10 +70,23 @@ class DatabaseManager:
                 username TEXT,
                 first_name TEXT,
                 is_paused INTEGER NOT NULL DEFAULT 0,
+                notify_live INTEGER NOT NULL DEFAULT 1,
+                notify_upcoming INTEGER NOT NULL DEFAULT 1,
+                min_odd REAL NOT NULL DEFAULT 1.30,
                 created_at TEXT NOT NULL,
                 updated_at TEXT NOT NULL
             );
             """)
+
+            # Columnas de preferencias (idempotente para bases de datos existentes)
+            cursor.execute("PRAGMA table_info(subscribers);")
+            existing_sub_cols = [c["name"] for c in cursor.fetchall()]
+            if "notify_live" not in existing_sub_cols:
+                cursor.execute("ALTER TABLE subscribers ADD COLUMN notify_live INTEGER NOT NULL DEFAULT 1;")
+            if "notify_upcoming" not in existing_sub_cols:
+                cursor.execute("ALTER TABLE subscribers ADD COLUMN notify_upcoming INTEGER NOT NULL DEFAULT 1;")
+            if "min_odd" not in existing_sub_cols:
+                cursor.execute("ALTER TABLE subscribers ADD COLUMN min_odd REAL NOT NULL DEFAULT 1.30;")
 
             # 2. Tabla de picks / pronósticos individuales
             cursor.execute("""

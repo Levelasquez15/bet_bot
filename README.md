@@ -43,14 +43,14 @@ Motor inteligente de pronósticos deportivos en tiempo real para fútbol, combin
 - [x] Auditoría de Bankroll: cálculo automático de Unidades Ganadas (+/- U), ROI / Yield %, racha actual y comando `/bankroll`
 
 ### 🔹 Módulo 5: Bot de Telegram Interactivo (`src/bot/`)
-- [x] Comandos de administración básicos (`/start`, `/status`, `/historial`, `/stats`, `/pause`, `/resume`, `/debug`, `/debugodds`)
+- [x] Comandos de administración básicos (`/start`, `/menu`, `/status`, `/historial`, `/stats`, `/pause`, `/resume`, `/debug`, `/debugodds`)
 - [x] Servidor HTTP de salud integrado en segundo plano en puerto 8000 (`/` y `/health`)
-- [x] Difusión automática de señales a suscriptores activos
+- [x] Difusión automática de señales a suscriptores activos filtrada por preferencias de modalidad
 - [x] Comando `/combinada` y `/parlay` para generar un ticket inteligente bajo demanda con valor matemático
 - [x] Comando `/bankroll` para auditoría financiera en vivo con desglose por modalidad (Live vs Pre)
-- [ ] Menú interactivo con botones Inline (`InlineKeyboardMarkup`)
-- [ ] Comando interactivo `/calendario` y `/jornada` para consultar partidos por fecha
-- [ ] Preferencias personalizadas por usuario (alertas de goles, cuota mínima deseada, etc.)
+- [x] Menú interactivo táctil con botones Inline (`InlineKeyboardMarkup` y `CallbackQueryHandler`)
+- [x] Comando interactivo `/jornada` y `/partidos` para consultar partidos en vivo y destacados de hoy
+- [x] Preferencias personalizadas por usuario: alternar alertas Live, Pre-partido o Pausa global con botones interactivos
 
 ### 🔹 Módulo 6: Despliegue y Operación 24/7 (`deploy/`)
 - [x] Contenedor Docker optimizado (`Dockerfile` con Python 3.12 y dependencias matemáticas)

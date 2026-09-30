@@ -3,7 +3,7 @@ import os
 from telegram.ext import ContextTypes
 from src.scraper.scraper_365 import Scraper365
 from src.analyzer.logic_tree import LogicTreeAnalyzer
-from src.bot.subscribers import add_subscriber, get_active_subscribers
+from src.bot.subscribers import add_subscriber, get_active_subscribers, get_active_subscribers_for_type
 from src.bot.pick_tracker import record_pick
 from src.worker.result_checker import setup_result_checker
 
@@ -15,7 +15,7 @@ _sent_picks: set = set()
 def format_live_pick(pick: dict) -> str:
     stake = 4 if pick["confidence"] >= 80 else 3 if pick["confidence"] >= 73 else 2
     return (
-        f"🤖⚽🤖 <b>ROBOT APUESTA</b> ⚽🤖⚽\n\n"
+        f"🤖⚽🤖 <b>ROBOT APUESTA (LIVE)</b> ⚽🤖⚽\n\n"
         f"<b>{pick['match']}</b>\n\n"
         f"{pick['market']}\n\n"
         f"💶 <b>CUOTA</b> 👉 {pick.get('odd', 'Validada ✅')}\n\n"
@@ -43,9 +43,9 @@ def format_upcoming_pick(pick: dict) -> str:
 
 
 async def _broadcast(context, picks: list, formatter, game_map: dict, pick_type: str) -> None:
-    """Envía picks a todos los suscriptores y los registra en el tracker."""
+    """Envía picks a los suscriptores activos según sus preferencias."""
     global _sent_picks
-    subscribers = get_active_subscribers()
+    subscribers = get_active_subscribers_for_type(pick_type)
 
     if not subscribers:
         logger.warning(f"{len(picks)} señal(es) sin suscriptores para enviar.")
