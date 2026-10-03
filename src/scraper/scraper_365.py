@@ -4,6 +4,7 @@ import httpx
 from datetime import datetime, timezone, timedelta
 from typing import Dict, Any, List, Optional
 from src.scraper.leagues import classify_competition, is_valid_match
+from src.scraper.flashscore_scraper import FlashscoreFallbackScraper
 
 logger = logging.getLogger(__name__)
 
@@ -256,6 +257,20 @@ class Scraper365:
                     g["live_stats"] = st
                 else:
                     g["live_stats"] = {"has_stats": False}
+
+            # Fallback opcional a Flashscore si algún partido quedó sin estadísticas en 365scores
+            missing = [g for g in live if not g.get("live_stats", {}).get("has_stats")]
+            if missing:
+                fs_scraper = FlashscoreFallbackScraper()
+                for g in missing:
+                    try:
+                        h = g.get("homeCompetitor", {}).get("name", "")
+                        a = g.get("awayCompetitor", {}).get("name", "")
+                        fs_st = await fs_scraper.find_stats_for_teams(h, a)
+                        if fs_st:
+                            g["live_stats"] = fs_st
+                    except Exception as e:
+                        logger.debug(f"Error consultando Flashscore fallback: {e}")
 
         logger.info(f"Partidos en vivo detectados y enriquecidos con estadísticas: {len(live)}")
         return live
