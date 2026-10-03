@@ -236,6 +236,7 @@ class Scraper365:
             "prog.", "sin cobertura", "interrumpido"
         )
 
+        now = datetime.now(tz=BOGOTA_TZ)
         for g in games:
             status_text = str(g.get("statusText", "")).strip()
             status_lower = status_text.lower()
@@ -253,14 +254,42 @@ class Scraper365:
             if any(kw in status_lower for kw in finished_keywords):
                 continue
 
-            # 2. Excluir partidos que han llegado al minuto 88+ o tiempo de descuento (90'+),
-            # salvo que sea prórroga oficial en copas/eliminatorias
+            # 2. Control de tiempo real transcurrido (Anti-partidos congelados o fantasma)
+            start_str = g.get("startTime", "")
+            elapsed_min = -1.0
+            if start_str:
+                try:
+                    start_dt = datetime.fromisoformat(start_str)
+                    now_cur = datetime.now(tz=start_dt.tzinfo or BOGOTA_TZ)
+                    elapsed_min = (now_cur - start_dt).total_seconds() / 60.0
+                except Exception:
+                    pass
+
             is_extra_time = "prórroga" in status_lower or "prorroga" in status_lower or "extra" in status_lower or "1te" in status_lower or "2te" in status_lower
+
+            # En fútbol real, ningún partido regular dura más de 125 minutos desde el pitazo inicial
+            if elapsed_min > 125.0 and not is_extra_time:
+                continue
+
+            # Un entretiempo (o marcador congelado en 45') no puede durar más de 75 minutos desde el pitazo inicial
+            if elapsed_min > 75.0 and (status_lower in ("entretiempo", "mt", "descanso") or (0 < game_time <= 45.0)):
+                continue
+
+            # El primer tiempo no puede durar más de 65 minutos de tiempo real
+            if elapsed_min > 65.0 and status_lower in ("primer tiempo", "1t"):
+                continue
+
+            # Si el reloj interno de 365scores está congelado y rezagado por más de 40 minutos
+            if elapsed_min > 40.0 and game_time > 0 and (elapsed_min - game_time) > 40.0 and not (status_lower in ("entretiempo", "mt", "descanso") and elapsed_min <= 65.0):
+                continue
+
+            # 3. Excluir partidos que han llegado al minuto 88+ o tiempo de descuento (90'+),
+            # salvo que sea prórroga oficial en copas/eliminatorias
             if not is_extra_time:
                 if game_time >= 88.0 or game_time_disp in ("90'", "90+"):
                     continue
 
-            # 3. Un partido está en vivo si está en statusGroup 3 (en juego) o texto activo
+            # 4. Un partido está en vivo si está en statusGroup 3 (en juego) o texto activo
             is_live = (
                 status_group == STATUS_LIVE
                 or status_lower in ("primer tiempo", "segundo tiempo", "entretiempo", "mt", "descanso", "1t", "2t", "tiempo extra", "prórroga")

@@ -11,6 +11,7 @@ Incluye comandos interactivos, botones Inline, menú de preferencias y control d
 import logging
 import os
 import json
+from datetime import datetime
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import Application, CommandHandler, CallbackQueryHandler, ContextTypes
 
@@ -19,7 +20,7 @@ from src.bot.subscribers import (
     get_subscriber_data, update_subscriber_prefs
 )
 from src.bot.pick_tracker import get_stats, get_recent_picks
-from src.scraper.scraper_365 import Scraper365
+from src.scraper.scraper_365 import Scraper365, BOGOTA_TZ
 from src.analyzer.logic_tree import LogicTreeAnalyzer
 from src.analyzer.combinadas import generate_best_parlay, format_parlay_message
 from src.db.database import db
@@ -307,6 +308,7 @@ async def jornada_command(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
         lines = ["📅 <b>JORNADA DE FÚTBOL MONITOREADA HOY</b> 📅\n"]
 
         truly_live = []
+        now_cur = datetime.now(tz=BOGOTA_TZ)
         for g in live:
             try:
                 gt = float(g.get("gameTime", 0))
@@ -315,6 +317,17 @@ async def jornada_command(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
             gtd = str(g.get("gameTimeDisplay", "")).strip()
             if gt >= 88.0 or gtd in ("90'", "90+", "Fin", "Finalizado"):
                 continue
+
+            start_str = g.get("startTime", "")
+            if start_str:
+                try:
+                    start_dt = datetime.fromisoformat(start_str)
+                    elapsed = (now_cur - start_dt).total_seconds() / 60.0
+                    if elapsed > 125.0 or (elapsed > 75.0 and gt <= 45.0):
+                        continue
+                except Exception:
+                    pass
+
             truly_live.append(g)
 
         if truly_live:
@@ -538,6 +551,7 @@ async def build_analizar_matches_keyboard() -> tuple[str, InlineKeyboardMarkup]:
         upcoming = await scraper.fetch_upcoming_matches(hours_ahead=12, filter_leagues=True)
 
         buttons = []
+        now_cur = datetime.now(tz=BOGOTA_TZ)
         if live:
             for g in live:
                 try:
@@ -547,6 +561,16 @@ async def build_analizar_matches_keyboard() -> tuple[str, InlineKeyboardMarkup]:
                 gtd = str(g.get("gameTimeDisplay", "")).strip()
                 if gt >= 88.0 or gtd in ("90'", "90+", "Fin", "Finalizado"):
                     continue
+
+                start_str = g.get("startTime", "")
+                if start_str:
+                    try:
+                        start_dt = datetime.fromisoformat(start_str)
+                        elapsed = (now_cur - start_dt).total_seconds() / 60.0
+                        if elapsed > 125.0 or (elapsed > 75.0 and gt <= 45.0):
+                            continue
+                    except Exception:
+                        pass
 
                 gid = str(g.get("id"))
                 h = g.get("homeCompetitor", {}).get("name", "")[:12]
