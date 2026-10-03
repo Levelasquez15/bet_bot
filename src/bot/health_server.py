@@ -8,6 +8,15 @@ logger = logging.getLogger(__name__)
 
 
 class HealthCheckHandler(BaseHTTPRequestHandler):
+    def do_HEAD(self):
+        if self.path in ("/", "/health", "/status"):
+            self.send_response(200)
+            self.send_header("Content-Type", "application/json; charset=utf-8")
+            self.end_headers()
+        else:
+            self.send_response(404)
+            self.end_headers()
+
     def do_GET(self):
         if self.path in ("/", "/health", "/status"):
             self.send_response(200)
