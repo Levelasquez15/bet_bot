@@ -23,8 +23,13 @@ from src.scraper.scraper_365 import Scraper365
 from src.analyzer.logic_tree import LogicTreeAnalyzer
 from src.analyzer.combinadas import generate_best_parlay, format_parlay_message
 from src.db.database import db
+from src.graph.decision_graph import DecisionGraph
+from src.graph.state import MatchState
 
 logger = logging.getLogger(__name__)
+
+# Instancia global del Grafo de Decisión y Director Técnico IA (Módulo 7)
+graph_engine = DecisionGraph()
 
 STATUS_EMOJI = {
     "GANADO":          "✅",
@@ -38,19 +43,22 @@ def get_main_menu_keyboard() -> InlineKeyboardMarkup:
     """Genera la botonera táctil principal para la navegación de los usuarios."""
     return InlineKeyboardMarkup([
         [
+            InlineKeyboardButton("🧠 Analizar Partido (IA)", callback_data="btn_analizar"),
             InlineKeyboardButton("🎰 Armar Combinada", callback_data="btn_combinada"),
+        ],
+        [
             InlineKeyboardButton("💼 Mi Bankroll & ROI", callback_data="btn_bankroll"),
-        ],
-        [
             InlineKeyboardButton("📊 Estadísticas", callback_data="btn_stats"),
+        ],
+        [
             InlineKeyboardButton("📋 Últimos Picks", callback_data="btn_historial"),
-        ],
-        [
             InlineKeyboardButton("⚽ Partidos En Vivo", callback_data="btn_live"),
-            InlineKeyboardButton("📅 Próximos Partidos", callback_data="btn_upcoming"),
         ],
         [
+            InlineKeyboardButton("📅 Próximos Partidos", callback_data="btn_upcoming"),
             InlineKeyboardButton("⚙️ Mis Preferencias", callback_data="btn_prefs"),
+        ],
+        [
             InlineKeyboardButton("🔄 Estado del Bot", callback_data="btn_status"),
         ]
     ])
@@ -414,8 +422,216 @@ async def debugodds_command(update: Update, context: ContextTypes.DEFAULT_TYPE) 
             await update.message.reply_text("❌ No encontré ningún partido en vivo con cuotas en este instante.")
     except Exception as e:
         await update.message.reply_text(f"❌ Error en debugodds: {e}")
+
+# ── Módulo 7: Informes Tácticos y Comando /analizar ───────────────────────────
+
+def format_tactical_analysis_report(state: MatchState) -> str:
+    verdict = state.verdict
+    sh = state.score_home
+    sa = state.score_away
+
+    if state.is_live:
+        header_time = f"🔴 <b>EN VIVO</b> (Minuto {state.minute}') | Marcador: <b>{sh} - {sa}</b>"
+    else:
+        header_time = f"⏳ <b>PRE-PARTIDO</b> | Inicio: <b>{state.minute}</b>"
+
+    ai_badge = "🤖 <b>DIRECTOR TÉCNICO IA (Gemini Flash)</b>" if (verdict and verdict.source == "GEMINI_FLASH") else "🧠 <b>SUPERVISOR TÁCTICO & CUANTITATIVO</b>"
+
+    selected_market = verdict.selected_market if verdict else "Bajo Observación"
+    odd_str = verdict.odd_str if verdict else "N/A"
+    conf = verdict.confidence if verdict else 0.0
+    stake = verdict.recommended_stake if verdict else 1
+    report = verdict.tactical_report if verdict else "Sin anomalías tácticas suficientes para sugerir apuesta activa."
+
+    stats = state.live_stats
+    stats_lines = []
+    if state.is_live and stats:
+        poss_h = stats.get("possession", {}).get("home", 50)
+        poss_a = stats.get("possession", {}).get("away", 50)
+        shots_h = stats.get("shots_on_target", {}).get("home", 0)
+        shots_a = stats.get("shots_on_target", {}).get("away", 0)
+        corners_h = stats.get("corners", {}).get("home", 0)
+        corners_a = stats.get("corners", {}).get("away", 0)
+        xg_h = stats.get("xg", {}).get("home", 0.0)
+        xg_a = stats.get("xg", {}).get("away", 0.0)
+        red_h = stats.get("red_cards", {}).get("home", 0)
+        red_a = stats.get("red_cards", {}).get("away", 0)
+
+        stats_lines.append("📊 <b>Estadísticas Reales en Vivo:</b>")
+        stats_lines.append(f"  • Posesión: {poss_h}% - {poss_a}%")
+        stats_lines.append(f"  • Tiros al arco: {shots_h} - {shots_a} | xG: {xg_h} - {xg_a}")
+        stats_lines.append(f"  • Córners: {corners_h} - {corners_a}")
+        if red_h > 0 or red_a > 0:
+            stats_lines.append(f"  • 🟥 Tarjetas Rojas: {red_h} - {red_a}")
+
+    specs_lines = []
+    for name, ev in state.evaluations.items():
+        specs_lines.append(f"  • <b>{name}:</b> {ev.recommended_market} ({ev.confidence}%)")
+
+    conflicts_lines = []
+    if state.conflicts:
+        for c in state.conflicts:
+            conflicts_lines.append(f"  • ⚠️ {c}")
+
+    synergies_lines = []
+    if state.synergies:
+        for s in state.synergies:
+            synergies_lines.append(f"  • ⚡ {s}")
+
+    lines = [
+        f"{ai_badge}\n",
+        f"⚽ <b>{state.match_name}</b>",
+        f"🏆 <i>{state.competition}</i>",
+        f"{header_time}\n",
+    ]
+    if stats_lines:
+        lines.extend(stats_lines)
+        lines.append("")
+
+    lines.extend([
+        "🎯 <b>VEREDICTO PRINCIPAL:</b>",
+        f"👉 <b>{selected_market}</b>",
+        f"💶 <b>Cuota Referencia:</b> {odd_str}",
+        f"🏦 <b>Confianza del Modelo:</b> {conf}%",
+        f"💰 <b>Stake Recomendado:</b> {stake} / 5\n",
+        "💡 <b>INFORME TÁCTICO:</b>",
+        f"{report}\n",
+    ])
+
+    if specs_lines:
+        lines.append("🧩 <b>Votos de Nodos Especialistas:</b>")
+        lines.extend(specs_lines)
+        lines.append("")
+
+    if synergies_lines:
+        lines.append("⚡ <b>Sinergias Detectadas:</b>")
+        lines.extend(synergies_lines)
+        lines.append("")
+
+    if conflicts_lines:
+        lines.append("⚠️ <b>Alertas de Riesgo / Conflictos:</b>")
+        lines.extend(conflicts_lines)
+        lines.append("")
+
+    return "\n".join(lines)
+
+
+async def build_analizar_matches_keyboard() -> tuple[str, InlineKeyboardMarkup]:
+    """Genera la botonera táctil para seleccionar un partido a analizar con IA."""
+    scraper = Scraper365()
+    try:
+        live = await scraper.fetch_live_matches(filter_leagues=True, fetch_stats=False)
+        upcoming = await scraper.fetch_upcoming_matches(hours_ahead=12, filter_leagues=True)
+
+        buttons = []
+        if live:
+            for g in live[:5]:
+                gid = str(g.get("id"))
+                h = g.get("homeCompetitor", {}).get("name", "")[:12]
+                a = g.get("awayCompetitor", {}).get("name", "")[:12]
+                min_str = g.get("gameTimeDisplay", "Live")
+                btn_txt = f"🔴 {h} vs {a} ({min_str}')"
+                buttons.append([InlineKeyboardButton(btn_txt, callback_data=f"anlz_{gid}")])
+
+        if upcoming:
+            for g in upcoming[:5]:
+                gid = str(g.get("id"))
+                h = g.get("homeCompetitor", {}).get("name", "")[:12]
+                a = g.get("awayCompetitor", {}).get("name", "")[:12]
+                st = g.get("startTime", "")[11:16] if g.get("startTime") else "Hoy"
+                btn_txt = f"⏳ {h} vs {a} ({st})"
+                buttons.append([InlineKeyboardButton(btn_txt, callback_data=f"anlz_{gid}")])
+
+        buttons.append([InlineKeyboardButton("🔙 Volver al Menú Principal", callback_data="btn_main_menu")])
+
+        if not live and not upcoming:
+            text = (
+                "🧠 <b>ANALIZADOR TÁCTICO CON IA (MÓDULO 7)</b> 🧠\n\n"
+                "No hay partidos programados o en vivo en este momento.\n"
+                "Puedes usar <code>/analizar [equipo]</code> (ej: <code>/analizar Real Madrid</code>) para buscar cualquier encuentro."
+            )
+        else:
+            text = (
+                "🧠 <b>ANALIZADOR TÁCTICO CON IA (MÓDULO 7)</b> 🧠\n\n"
+                "Selecciona un partido para que el <b>Grafo de Especialistas</b> y el <b>Director Técnico IA</b> elaboren un informe táctico profundo:"
+            )
+
+        return text, InlineKeyboardMarkup(buttons)
     finally:
         await scraper.close()
+
+
+async def analizar_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Comando /analizar [equipo/partido] para invocar el DecisionGraph y Gemini Flash bajo demanda."""
+    if not update.effective_chat:
+        return
+
+    # Si el usuario pasó argumentos (ej: /analizar Barcelona)
+    if context.args:
+        query = " ".join(context.args).strip().lower()
+        if update.message:
+            wait_msg = await update.message.reply_html(f"🔍 Buscando <b>'{query}'</b> y corriendo Grafo de Agentes IA...")
+        else:
+            wait_msg = None
+
+        scraper = Scraper365()
+        try:
+            live = await scraper.fetch_live_matches(filter_leagues=False, fetch_stats=True)
+            upcoming = await scraper.fetch_upcoming_matches(hours_ahead=24, filter_leagues=False)
+
+            all_matches = [(g, True) for g in live] + [(g, False) for g in upcoming]
+            matched = None
+            is_live = False
+
+            for g, live_flag in all_matches:
+                h = g.get("homeCompetitor", {}).get("name", "").lower()
+                a = g.get("awayCompetitor", {}).get("name", "").lower()
+                if query in h or query in a:
+                    matched = g
+                    is_live = live_flag
+                    break
+
+            if not matched:
+                err_text = (
+                    f"❌ No se encontró ningún partido activo hoy para: <b>'{query}'</b>.\n\n"
+                    "Usa <code>/analizar</code> sin argumentos para ver la lista de partidos disponibles."
+                )
+                if wait_msg:
+                    await wait_msg.edit_text(err_text, parse_mode="HTML", reply_markup=get_back_keyboard())
+                elif update.message:
+                    await update.message.reply_html(err_text, reply_markup=get_back_keyboard())
+                return
+
+            # Ejecutar Grafo de Estados con Gemini Supervisor
+            state = await graph_engine.evaluate_match(matched, is_live=is_live, force_llm=True)
+            report_msg = format_tactical_analysis_report(state)
+
+            if wait_msg:
+                await wait_msg.edit_text(report_msg, parse_mode="HTML", reply_markup=get_back_keyboard())
+            elif update.message:
+                await update.message.reply_html(report_msg, reply_markup=get_back_keyboard())
+
+        except Exception as e:
+            logger.error(f"Error en analizar_command con args: {e}", exc_info=True)
+            err_msg = f"❌ Error ejecutando análisis con IA: {e}"
+            if wait_msg:
+                await wait_msg.edit_text(err_msg, reply_markup=get_back_keyboard())
+            elif update.message:
+                await update.message.reply_text(err_msg, reply_markup=get_back_keyboard())
+        finally:
+            await scraper.close()
+    else:
+        # Menú táctil con botones de partidos
+        try:
+            text, keyboard = await build_analizar_matches_keyboard()
+            if update.message:
+                await update.message.reply_html(text, reply_markup=keyboard)
+            elif update.callback_query:
+                await update.callback_query.edit_message_text(text, parse_mode="HTML", reply_markup=keyboard)
+        except Exception as e:
+            logger.error(f"Error en analizar_command sin args: {e}", exc_info=True)
+            if update.message:
+                await update.message.reply_text(f"❌ Error consultando partidos para análisis: {e}")
 
 
 # ── Manejador de Botones Táctiles (Callback Queries) ──────────────────────────
@@ -439,6 +655,46 @@ async def button_callback_handler(update: Update, context: ContextTypes.DEFAULT_
             parse_mode="HTML",
             reply_markup=get_main_menu_keyboard()
         )
+
+    elif data == "btn_analizar":
+        text, keyboard = await build_analizar_matches_keyboard()
+        await query.edit_message_text(text, parse_mode="HTML", reply_markup=keyboard)
+
+    elif data.startswith("anlz_"):
+        target_gid = data.replace("anlz_", "").strip()
+        await query.edit_message_text("🧠 <i>Procesando estadísticas tácticas con Director Técnico IA...</i>", parse_mode="HTML")
+        scraper = Scraper365()
+        try:
+            live = await scraper.fetch_live_matches(filter_leagues=False, fetch_stats=True)
+            upcoming = await scraper.fetch_upcoming_matches(hours_ahead=24, filter_leagues=False)
+
+            target_game = None
+            is_live = False
+            for g in live:
+                if str(g.get("id")) == target_gid:
+                    target_game = g
+                    is_live = True
+                    break
+
+            if not target_game:
+                for g in upcoming:
+                    if str(g.get("id")) == target_gid:
+                        target_game = g
+                        is_live = False
+                        break
+
+            if not target_game:
+                await query.edit_message_text("❌ No se encontró la información del partido solicitado.", reply_markup=get_back_keyboard())
+                return
+
+            state = await graph_engine.evaluate_match(target_game, is_live=is_live, force_llm=True)
+            report = format_tactical_analysis_report(state)
+            await query.edit_message_text(report, parse_mode="HTML", reply_markup=get_back_keyboard())
+        except Exception as e:
+            logger.error(f"Error analizando partido por botón: {e}", exc_info=True)
+            await query.edit_message_text(f"❌ Error analizando partido: {e}", reply_markup=get_back_keyboard())
+        finally:
+            await scraper.close()
 
     elif data == "btn_combinada":
         await combinada_command(update, context)
@@ -508,6 +764,7 @@ def create_application() -> Application:
     app.add_handler(CommandHandler("partidos",  jornada_command))
     app.add_handler(CommandHandler("pause",     pause_command))
     app.add_handler(CommandHandler("resume",    resume_command))
+    app.add_handler(CommandHandler("analizar",  analizar_command))
     app.add_handler(CommandHandler("debug",     debug_command))
     app.add_handler(CommandHandler("debugodds", debugodds_command))
 

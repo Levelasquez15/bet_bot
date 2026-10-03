@@ -7,13 +7,16 @@ from src.bot.subscribers import add_subscriber, get_active_subscribers, get_acti
 from src.bot.pick_tracker import record_pick
 from src.worker.result_checker import setup_result_checker
 
+from src.graph.decision_graph import DecisionGraph
+
 logger = logging.getLogger(__name__)
 
 _sent_picks: set = set()
 
 
 def format_live_pick(pick: dict) -> str:
-    stake = 4 if pick["confidence"] >= 80 else 3 if pick["confidence"] >= 73 else 2
+    stake = pick.get("recommended_stake") or (4 if pick["confidence"] >= 80 else 3 if pick["confidence"] >= 73 else 2)
+    tactical = f"\n🧠 <b>TÁCTICA IA:</b> {pick['tactical_report']}" if pick.get("tactical_report") else ""
     return (
         f"🤖⚽🤖 <b>ROBOT APUESTA (LIVE)</b> ⚽🤖⚽\n\n"
         f"<b>{pick['match']}</b>\n\n"
@@ -21,15 +24,16 @@ def format_live_pick(pick: dict) -> str:
         f"💶 <b>CUOTA</b> 👉 {pick.get('odd', 'Validada ✅')}\n\n"
         f"🏦 <b>CONFIANZA</b> 🏦 👉 {pick['confidence']}%\n\n"
         f"⏱️ Minuto: {pick['minute']}'\n"
-        f"💡 {pick['reason']}\n\n"
+        f"💡 {pick['reason']}{tactical}\n\n"
         f"STAKE {stake}"
     )
 
 
 def format_upcoming_pick(pick: dict) -> str:
     v_info = pick.get("value_info")
-    stake = v_info.get("recommended_stake", 2) if v_info else (3 if pick["confidence"] >= 78 else 2)
+    stake = pick.get("recommended_stake") or (v_info.get("recommended_stake", 2) if v_info else (3 if pick["confidence"] >= 78 else 2))
     ev_str = f"\n📈 <b>VALOR ESPERADO (EV):</b> +{v_info['ev_pct']}%\n🎯 <b>CUOTA JUSTA:</b> {v_info['fair_odd']}" if v_info else ""
+    tactical = f"\n🧠 <b>TÁCTICA IA:</b> {pick['tactical_report']}" if pick.get("tactical_report") else ""
     return (
         f"📅⚽ <b>ANÁLISIS PRE-PARTIDO (VALUE BET)</b> ⚽📅\n\n"
         f"<b>{pick['match']}</b>\n"
@@ -37,7 +41,7 @@ def format_upcoming_pick(pick: dict) -> str:
         f"{pick['market']}\n\n"
         f"💶 <b>CUOTA CASA</b> 👉 {pick.get('odd', 'Validada ✅')}{ev_str}\n\n"
         f"📊 <b>PROBABILIDAD</b> 📊 👉 {pick['confidence']}%\n"
-        f"💡 {pick['reason']}\n\n"
+        f"💡 {pick['reason']}{tactical}\n\n"
         f"STAKE {stake}"
     )
 
@@ -95,33 +99,18 @@ def _build_game_map(games: list) -> dict:
 
 
 async def scraping_job(context: ContextTypes.DEFAULT_TYPE) -> None:
-    """Tarea principal: cada 2 minutos analiza en vivo + próximos."""
+    """Tarea principal: cada 2 minutos analiza en vivo + próximos con el Grafo de Decisión."""
     logger.info("━━━ Ciclo de escaneo ━━━")
-    scraper  = Scraper365()
-    analyzer = LogicTreeAnalyzer()
+    scraper = Scraper365()
+    graph = DecisionGraph()
 
     try:
         # ── En Vivo ────────────────────────────────────────────
         live_games = await scraper.fetch_live_matches()
         if live_games:
-            picks = analyzer.analyze_live(live_games)
+            picks = await graph.analyze_batch(live_games, is_live=True)
             if picks:
-                # Enriquecer picks con score actual para el tracker
-                live_map = {}
-                score_lookup = {}
-                for g in live_games:
-                    h = g.get("homeCompetitor", {}).get("name", "")
-                    a = g.get("awayCompetitor", {}).get("name", "")
-                    key = f"{h} - {a}"
-                    live_map[key]    = str(g.get("id", ""))
-                    score_lookup[key] = (
-                        g.get("homeCompetitor", {}).get("score", 0),
-                        g.get("awayCompetitor", {}).get("score", 0)
-                    )
-                for pick in picks:
-                    sh, sa = score_lookup.get(pick["match"], (0, 0))
-                    pick["score_home"] = sh
-                    pick["score_away"] = sa
+                live_map = _build_game_map(live_games)
                 await _broadcast(context, picks, format_live_pick, live_map, "live")
         else:
             logger.info("Sin partidos en vivo.")
@@ -129,7 +118,7 @@ async def scraping_job(context: ContextTypes.DEFAULT_TYPE) -> None:
         # ── Próximos ───────────────────────────────────────────
         upcoming_games = await scraper.fetch_upcoming_matches(hours_ahead=3)
         if upcoming_games:
-            picks = analyzer.analyze_upcoming(upcoming_games)
+            picks = await graph.analyze_batch(upcoming_games, is_live=False)
             if picks:
                 upcoming_map = _build_game_map(upcoming_games)
                 for pick in picks:

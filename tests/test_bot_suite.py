@@ -30,6 +30,11 @@ def test_imports():
     import src.bot.telegram_client
     import src.worker.main_worker
     import src.worker.result_checker
+    import src.graph.state
+    import src.graph.specialists
+    import src.graph.gatekeeper
+    import src.graph.supervisor
+    import src.graph.decision_graph
     print("✅ Todos los módulos se importan correctamente.")
 
 
@@ -79,9 +84,42 @@ def test_database():
     print("✅ Persistencia y verificador de mercados validados.")
 
 
+def test_graph_engine():
+    """Verifica el DecisionGraph y Nodos Especialistas del Módulo 7."""
+    from src.graph.decision_graph import DecisionGraph
+    from src.graph.gatekeeper import Gatekeeper
+    import asyncio
+
+    graph = DecisionGraph()
+    gk = Gatekeeper()
+    stats = gk.get_stats()
+    assert "calls_last_hour" in stats
+
+    dummy_game = {
+        "id": "777",
+        "homeCompetitor": {"name": "Arsenal", "score": 1},
+        "awayCompetitor": {"name": "Chelsea", "score": 1},
+        "competitionDisplayName": "Premier League",
+        "gameTime": 70,
+        "statusGroup": 2,
+        "live_stats": {
+            "shots_on_target": {"home": 4, "away": 3},
+            "xg": {"home": 0.9, "away": 0.8},
+            "possession": {"home": 51.0, "away": 49.0},
+            "corners": {"home": 5, "away": 4},
+            "red_cards": {"home": 0, "away": 0}
+        }
+    }
+    state = asyncio.run(graph.evaluate_match(dummy_game, is_live=True, force_llm=False))
+    assert state.final_pick is not None
+    assert state.verdict is not None
+    print("✅ DecisionGraph y Nodos Especialistas validados.")
+
+
 if __name__ == "__main__":
     print("Ejecutando suite de pruebas de BetBot...")
     test_imports()
     test_models()
     test_database()
+    test_graph_engine()
     print("🎉 ¡TODOS LOS TESTS PASARON EXITOSAMENTE!")
