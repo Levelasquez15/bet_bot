@@ -25,8 +25,8 @@ DEFAULT_HEADERS = {
 
 # statusGroup codes de 365scores
 STATUS_UPCOMING  = 1
-STATUS_LIVE      = 2
-STATUS_HALF_TIME = 3
+STATUS_SCHEDULED = 2
+STATUS_LIVE      = 3
 STATUS_FINISHED  = 4
 
 BOGOTA_TZ = timezone(timedelta(hours=-5))
@@ -230,16 +230,41 @@ class Scraper365:
         games = await self._fetch_games(include_tomorrow=False)
         live = []
 
+        finished_keywords = (
+            "finalizado", "final", "fin", "fin.", "ft", "aet", "terminado",
+            "encerrado", "aplazado", "cancelado", "suspendido", "postp.",
+            "prog.", "sin cobertura", "interrumpido"
+        )
+
         for g in games:
             status_text = str(g.get("statusText", "")).strip()
+            status_lower = status_text.lower()
             status_group = g.get("statusGroup")
-            game_time = g.get("gameTime", -1)
 
-            # En 365scores, a veces statusGroup es 2 para programados si statusText es "Prog."
-            # Un partido está en vivo si el reloj corre, es entretiempo o el estado indica juego activo
+            try:
+                game_time = float(g.get("gameTime", -1))
+            except (ValueError, TypeError):
+                game_time = -1.0
+            game_time_disp = str(g.get("gameTimeDisplay", "")).strip()
+
+            # 1. Excluir explícitamente terminados, aplazados o sin cobertura
+            if status_group == STATUS_FINISHED:
+                continue
+            if any(kw in status_lower for kw in finished_keywords):
+                continue
+
+            # 2. Excluir partidos que han llegado al minuto 88+ o tiempo de descuento (90'+),
+            # salvo que sea prórroga oficial en copas/eliminatorias
+            is_extra_time = "prórroga" in status_lower or "prorroga" in status_lower or "extra" in status_lower or "1te" in status_lower or "2te" in status_lower
+            if not is_extra_time:
+                if game_time >= 88.0 or game_time_disp in ("90'", "90+"):
+                    continue
+
+            # 3. Un partido está en vivo si está en statusGroup 3 (en juego) o texto activo
             is_live = (
-                status_text not in ("Prog.", "Aplazado", "Finalizado", "Fin", "Suspendido")
-                and (game_time > 0 or status_group in (STATUS_LIVE, STATUS_HALF_TIME) or status_text in ("1T", "2T", "MT", "Descanso"))
+                status_group == STATUS_LIVE
+                or status_lower in ("primer tiempo", "segundo tiempo", "entretiempo", "mt", "descanso", "1t", "2t", "tiempo extra", "prórroga")
+                or (0 < game_time < 88.0)
             )
             if not is_live:
                 continue
@@ -294,12 +319,13 @@ class Scraper365:
 
         for g in games:
             status_text = str(g.get("statusText", "")).strip()
+            status_lower = status_text.lower()
             status_group = g.get("statusGroup")
 
-            # Próximos: estado "Prog." o statusGroup == 1, excluyendo aplazados o terminados
+            # Próximos: estado "Prog." o statusGroup in (STATUS_UPCOMING, STATUS_SCHEDULED), excluyendo aplazados o terminados
             is_upcoming = (
-                (status_text == "Prog." or status_group == STATUS_UPCOMING)
-                and status_text not in ("Aplazado", "Cancelado", "Finalizado", "Fin")
+                (status_text == "Prog." or status_group in (STATUS_UPCOMING, STATUS_SCHEDULED))
+                and not any(kw in status_lower for kw in ("aplazado", "cancelado", "finalizado", "fin", "suspendido", "postp."))
             )
             if not is_upcoming:
                 continue

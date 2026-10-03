@@ -17,13 +17,17 @@ _sent_picks: set = set()
 def format_live_pick(pick: dict) -> str:
     stake = pick.get("recommended_stake") or (4 if pick["confidence"] >= 80 else 3 if pick["confidence"] >= 73 else 2)
     tactical = f"\n🧠 <b>TÁCTICA IA:</b> {pick['tactical_report']}" if pick.get("tactical_report") else ""
+    try:
+        min_disp = str(int(float(pick["minute"])))
+    except (ValueError, TypeError):
+        min_disp = str(pick.get("minute", "Live")).replace("'", "")
     return (
         f"🤖⚽🤖 <b>ROBOT APUESTA (LIVE)</b> ⚽🤖⚽\n\n"
         f"<b>{pick['match']}</b>\n\n"
         f"{pick['market']}\n\n"
         f"💶 <b>CUOTA</b> 👉 {pick.get('odd', 'Validada ✅')}\n\n"
         f"🏦 <b>CONFIANZA</b> 🏦 👉 {pick['confidence']}%\n\n"
-        f"⏱️ Minuto: {pick['minute']}'\n"
+        f"⏱️ Minuto: {min_disp}'\n"
         f"💡 {pick['reason']}{tactical}\n\n"
         f"STAKE {stake}"
     )

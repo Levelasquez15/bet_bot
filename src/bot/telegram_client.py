@@ -306,14 +306,28 @@ async def jornada_command(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
 
         lines = ["📅 <b>JORNADA DE FÚTBOL MONITOREADA HOY</b> 📅\n"]
 
-        if live:
+        truly_live = []
+        for g in live:
+            try:
+                gt = float(g.get("gameTime", 0))
+            except (ValueError, TypeError):
+                gt = 0.0
+            gtd = str(g.get("gameTimeDisplay", "")).strip()
+            if gt >= 88.0 or gtd in ("90'", "90+", "Fin", "Finalizado"):
+                continue
+            truly_live.append(g)
+
+        if truly_live:
             lines.append("🔴 <b>PARTIDOS EN VIVO AHORA:</b>")
-            for g in live[:6]:
+            for g in truly_live[:6]:
                 h = g.get("homeCompetitor", {}).get("name", "")
                 a = g.get("awayCompetitor", {}).get("name", "")
-                sh = g.get("homeCompetitor", {}).get("score", 0)
-                sa = g.get("awayCompetitor", {}).get("score", 0)
-                min_str = g.get("gameTimeDisplay", "Live")
+                try:
+                    sh = int(float(g.get("homeCompetitor", {}).get("score", 0)))
+                    sa = int(float(g.get("awayCompetitor", {}).get("score", 0)))
+                except (ValueError, TypeError):
+                    sh, sa = 0, 0
+                min_str = str(g.get("gameTimeDisplay") or g.get("gameTime") or "Live").replace("'", "")
                 lines.append(f"  • {h} {sh}-{sa} {a} ⏱️ ({min_str}')")
             lines.append("")
 
@@ -525,13 +539,23 @@ async def build_analizar_matches_keyboard() -> tuple[str, InlineKeyboardMarkup]:
 
         buttons = []
         if live:
-            for g in live[:5]:
+            for g in live:
+                try:
+                    gt = float(g.get("gameTime", 0))
+                except (ValueError, TypeError):
+                    gt = 0.0
+                gtd = str(g.get("gameTimeDisplay", "")).strip()
+                if gt >= 88.0 or gtd in ("90'", "90+", "Fin", "Finalizado"):
+                    continue
+
                 gid = str(g.get("id"))
                 h = g.get("homeCompetitor", {}).get("name", "")[:12]
                 a = g.get("awayCompetitor", {}).get("name", "")[:12]
-                min_str = g.get("gameTimeDisplay", "Live")
+                min_str = str(g.get("gameTimeDisplay") or g.get("gameTime") or "Live").replace("'", "")
                 btn_txt = f"🔴 {h} vs {a} ({min_str}')"
                 buttons.append([InlineKeyboardButton(btn_txt, callback_data=f"anlz_{gid}")])
+                if len(buttons) >= 5:
+                    break
 
         if upcoming:
             for g in upcoming[:5]:

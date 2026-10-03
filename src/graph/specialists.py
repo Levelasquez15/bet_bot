@@ -17,6 +17,13 @@ from src.models.value import calculate_value
 logger = logging.getLogger(__name__)
 
 
+def _safe_int(value) -> int:
+    try:
+        return int(float(value))
+    except (TypeError, ValueError):
+        return 0
+
+
 class MomentumSpecialistNode:
     """
     Especialista en Timing, Ritmo de Juego y Presión de Gol Inminente.
@@ -28,6 +35,10 @@ class MomentumSpecialistNode:
             return None
 
         minute = self._safe_int(state.minute)
+        # Modo Sniper: ventana de apuestas cerrada en minutos finales o relojes anómalos
+        if minute <= 0 or minute > 80:
+            return None
+
         sh = state.score_home
         sa = state.score_away
         total_goles = state.total_goals
@@ -41,8 +52,8 @@ class MomentumSpecialistNode:
         xg_a = stats.get("xg", {}).get("away", 0.0)
         total_xg = round(xg_h + xg_a, 2)
 
-        # Heurística 1: Empate tardío con llegada constante (Min 62-82) - MODO SNIPER
-        if 62 <= minute <= 82 and sh == sa:
+        # Heurística 1: Empate tardío con llegada constante (Min 62-78) - MODO SNIPER
+        if 62 <= minute <= 78 and sh == sa:
             if total_shots_target >= 6 or total_xg >= 1.4:
                 return NodeEvaluation(
                     node_name="MomentumSpecialist",
@@ -55,7 +66,7 @@ class MomentumSpecialistNode:
                 )
 
         # Heurística 3: Ritmo frenético de goles tempraneros (Min <= 58, 2+ goles) - MODO SNIPER
-        if minute <= 58 and total_goles >= 2:
+        if 15 <= minute <= 58 and total_goles >= 2:
             if total_shots_target >= 5 or total_xg >= 1.4:
                 return NodeEvaluation(
                     node_name="MomentumSpecialist",
@@ -68,7 +79,8 @@ class MomentumSpecialistNode:
                 )
 
         # Heurística 6: Medio Tiempo con 2+ goles anotados
-        if state.is_half_time and total_goles >= 2:
+        # Solo válido si es entretiempo explícito y el minuto corresponde al descanso (<= 52)
+        if state.is_half_time and (minute <= 52 or minute == 0) and total_goles >= 2:
             return NodeEvaluation(
                 node_name="MomentumSpecialist",
                 recommended_market="Más de 2.5 Goles en el partido",
@@ -99,6 +111,10 @@ class SiegeXGSpecialistNode:
             return None
 
         minute = self._safe_int(state.minute)
+        # Modo Sniper: ventana de apuestas cerrada en minutos finales o relojes anómalos
+        if minute <= 0 or minute > 80:
+            return None
+
         sh = state.score_home
         sa = state.score_away
         diff = state.score_diff
@@ -120,8 +136,8 @@ class SiegeXGSpecialistNode:
         poss_h = stats.get("possession", {}).get("home", 50.0)
         poss_a = stats.get("possession", {}).get("away", 50.0)
 
-        # Heurística 2: Asedio del equipo que pierde por 1 gol -> Córners (Modo Sniper)
-        if minute >= 58 and diff == 1:
+        # Heurística 2: Asedio del equipo que pierde por 1 gol -> Córners (Modo Sniper: min 55 a 78)
+        if 55 <= minute <= 78 and diff == 1:
             trailing_home = sh < sa
             perdedor = state.home_team if trailing_home else state.away_team
             poss_perdedor = poss_h if trailing_home else poss_a
@@ -139,8 +155,8 @@ class SiegeXGSpecialistNode:
                     signals={"target_corners": target_corners, "corners_now": total_corners, "possession": poss_perdedor}
                 )
 
-        # Heurística 4: Partido de Bloqueo / Cerrojo -> Under 1.5 (Modo Sniper)
-        if 48 <= minute <= 68 and total_goles == 0:
+        # Heurística 4: Partido de Bloqueo / Cerrojo -> Under 1.5 (Modo Sniper: min 48 a 65)
+        if 48 <= minute <= 65 and total_goles == 0:
             if total_shots_target <= 2 and total_xg <= 0.45:
                 return NodeEvaluation(
                     node_name="SiegeXGSpecialist",
@@ -172,6 +188,12 @@ class PoissonEloValueSpecialistNode:
         self.elo = EloModel()
 
     def evaluate(self, state: MatchState) -> Optional[NodeEvaluation]:
+        # Modo Sniper: en vivo, la ventana cuantitativa se restringe al minuto <= 75
+        if state.is_live:
+            minute = _safe_int(state.minute)
+            if minute <= 0 or minute > 75:
+                return None
+
         # Estimar promedio de goles de liga
         base_goals = self._lambda_por_liga(state.competition)
 
@@ -282,14 +304,18 @@ class DisciplinarySpecialistNode:
             return None
 
         minute = self._safe_int(state.minute)
+        # Modo Sniper: ventana disciplinaria efectiva entre minuto 30 y 78
+        if minute < 30 or minute > 78:
+            return None
+
         stats = state.live_stats
         red_h = stats.get("red_cards", {}).get("home", 0)
         red_a = stats.get("red_cards", {}).get("away", 0)
         poss_h = stats.get("possession", {}).get("home", 50.0)
         poss_a = stats.get("possession", {}).get("away", 50.0)
 
-        # Heurística 5: Ventaja Numérica por Tarjeta Roja (Minuto >= 30)
-        if minute >= 30 and (red_h > 0 or red_a > 0):
+        # Heurística 5: Ventaja Numérica por Tarjeta Roja (Minuto 30-78)
+        if (red_h > 0 or red_a > 0):
             equipo_superior = state.home_team if red_a > 0 else state.away_team
             equipo_inferior = state.away_team if red_a > 0 else state.home_team
             poss_superior = poss_h if red_a > 0 else poss_a

@@ -50,7 +50,12 @@ class DecisionGraph:
         sh = self._safe_int(game.get("homeCompetitor", {}).get("score", 0))
         sa = self._safe_int(game.get("awayCompetitor", {}).get("score", 0))
         minute = game.get("gameTime", "0") if is_live else game.get("startTime", "")[:16].replace("T", " ")
-        is_half_time = game.get("statusGroup") == 3
+        minute_int = self._safe_int(minute)
+        status_text_clean = str(game.get("statusText", "")).strip().lower()
+        is_half_time = (
+            status_text_clean in ("entretiempo", "mt", "descanso", "ht", "half time", "halftime")
+            or (minute_int == 45 and status_text_clean not in ("primer tiempo", "segundo tiempo"))
+        )
 
         stats = game.get("live_stats", {})
         odds = game.get("parsed_odds") or extract_match_odds(game)
@@ -81,6 +86,15 @@ class DecisionGraph:
         6. Síntesis del Pick final.
         """
         state = self.build_state_from_game(game, is_live=is_live)
+
+        # ── MODO SNIPER: Guard estricto de tiempo de juego en vivo ──
+        if is_live:
+            minute_int = self._safe_int(state.minute)
+            # Calidad antes que cantidad: nunca emitir recomendaciones en vivo
+            # después del minuto 80, en tiempo de descuento (90+), o si el reloj es inválido (<= 0)
+            if minute_int >= 80 or minute_int <= 0:
+                logger.info(f"Modo Sniper: Ignorando partido en vivo en min {minute_int}' ({state.match_name}). Ventana de apuestas cerrada.")
+                return state
 
         # ── 1. Enrutamiento Dinámico a Nodos Especialistas ──
         if is_live:
@@ -174,9 +188,16 @@ class DecisionGraph:
 
     def _format_final_pick(self, state: MatchState, verdict: SupervisorVerdict) -> Dict[str, Any]:
         """Ensambla el diccionario del pick final listo para el worker y telegram."""
+        min_clean = str(state.minute)
+        if state.is_live:
+            try:
+                min_clean = str(int(float(state.minute)))
+            except (ValueError, TypeError):
+                min_clean = str(state.minute).replace("'", "")
+
         return {
             "match": state.match_name,
-            "minute": state.minute,
+            "minute": min_clean,
             "market": verdict.selected_market,
             "reason": verdict.tactical_report,
             "confidence": verdict.confidence,

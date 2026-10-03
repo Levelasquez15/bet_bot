@@ -46,12 +46,16 @@ class LogicTreeAnalyzer:
             sa = self._safe_int(game.get("awayCompetitor", {}).get("score", 0))
             minute = self._safe_int(game.get("gameTime", 0))
 
-            if minute <= 0:
+            if minute <= 0 or minute > 80:
                 continue
 
             total_goles = sh + sa
             diff = abs(sh - sa)
-            is_half_time = game.get("statusGroup") == 3
+            status_text_clean = str(game.get("statusText", "")).strip().lower()
+            is_half_time = (
+                status_text_clean in ("entretiempo", "mt", "descanso", "ht", "half time", "halftime")
+                or (minute == 45 and status_text_clean not in ("primer tiempo", "segundo tiempo"))
+            )
 
             # Estadísticas en vivo reales
             stats = game.get("live_stats", {})
@@ -146,7 +150,7 @@ class LogicTreeAnalyzer:
                     )
 
             # ── ÁRBOL 6: Medio Tiempo con Goles → Over 2.5 ──
-            elif is_half_time and total_goles >= 2:
+            elif is_half_time and (minute <= 52 or minute == 0) and total_goles >= 2:
                 pick = self._make_pick(
                     match_name, "MT",
                     "Más de 2.5 Goles en el partido",
