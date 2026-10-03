@@ -115,6 +115,11 @@ class DecisionGraph:
         if not state.evaluations:
             return state
 
+        # Criterio Sniper: en vivo es obligatorio contar con estadísticas reales activas
+        has_real_stats = state.live_stats.get("has_stats", False) or bool(state.live_stats.get("shots_on_target"))
+        if is_live and not has_real_stats:
+            return state
+
         # ── 3. Gatekeeper: ¿Autoriza llamada a LLM? ──
         allowed, reason = self.gatekeeper.should_invoke_llm(state, force=force_llm)
         state.gatekeeper_passed = allowed
@@ -126,8 +131,8 @@ class DecisionGraph:
         if allowed and verdict.source == "GEMINI_FLASH":
             self.gatekeeper.record_llm_invocation(state.game_id)
 
-        # ── 5. Construcción del Pick Final Estructurado ──
-        if verdict.decision == "APPROVE" and verdict.confidence >= 65.0:
+        # ── 5. Construcción del Pick Final Estructurado (Criterio Sniper: >= 78.0%) ──
+        if verdict.decision == "APPROVE" and verdict.confidence >= 78.0:
             state.final_pick = self._format_final_pick(state, verdict)
 
         return state

@@ -41,28 +41,28 @@ class MomentumSpecialistNode:
         xg_a = stats.get("xg", {}).get("away", 0.0)
         total_xg = round(xg_h + xg_a, 2)
 
-        # Heurística 1: Empate tardío con llegada constante (Min 62-82)
+        # Heurística 1: Empate tardío con llegada constante (Min 62-82) - MODO SNIPER
         if 62 <= minute <= 82 and sh == sa:
-            if total_shots_target >= 5 or total_xg >= 1.2:
+            if total_shots_target >= 6 or total_xg >= 1.4:
                 return NodeEvaluation(
                     node_name="MomentumSpecialist",
                     recommended_market="Próximo Gol: Habrá al menos 1 gol más",
-                    confidence=78.0,
+                    confidence=82.0,
                     estimated_odd=1.75,
-                    rationale=f"Empate {sh}-{sa} al min {minute} con alta presión ofensiva ({total_shots_target} tiros a puerta, xG {total_xg}).",
+                    rationale=f"Empate {sh}-{sa} al min {minute} con asedio ofensivo brutal ({total_shots_target} tiros a puerta, xG {total_xg}).",
                     sentiment="BULLISH_OVER",
                     signals={"minute": minute, "shots_on_target": total_shots_target, "total_xg": total_xg}
                 )
 
-        # Heurística 3: Ritmo frenético de goles tempraneros (Min <= 58, 2+ goles)
+        # Heurística 3: Ritmo frenético de goles tempraneros (Min <= 58, 2+ goles) - MODO SNIPER
         if minute <= 58 and total_goles >= 2:
-            if total_shots_target >= 4 or total_xg >= 1.3:
+            if total_shots_target >= 5 or total_xg >= 1.4:
                 return NodeEvaluation(
                     node_name="MomentumSpecialist",
                     recommended_market="Más de 2.5 Goles en el partido",
-                    confidence=82.0,
+                    confidence=85.0,
                     estimated_odd=1.60,
-                    rationale=f"Ritmo vertiginoso: {total_goles} goles en min {minute}, {total_shots_target} tiros al arco y xG acumulado de {total_xg}.",
+                    rationale=f"Ritmo vertiginoso confirmado: {total_goles} goles en min {minute}, {total_shots_target} tiros al arco y xG acumulado de {total_xg}.",
                     sentiment="BULLISH_OVER",
                     signals={"minute": minute, "total_goals": total_goles, "total_xg": total_xg}
                 )
@@ -120,32 +120,32 @@ class SiegeXGSpecialistNode:
         poss_h = stats.get("possession", {}).get("home", 50.0)
         poss_a = stats.get("possession", {}).get("away", 50.0)
 
-        # Heurística 2: Asedio del equipo que pierde por 1 gol -> Córners
+        # Heurística 2: Asedio del equipo que pierde por 1 gol -> Córners (Modo Sniper)
         if minute >= 58 and diff == 1:
             trailing_home = sh < sa
             perdedor = state.home_team if trailing_home else state.away_team
             poss_perdedor = poss_h if trailing_home else poss_a
             tiros_perdedor = shots_target_h if trailing_home else shots_target_a
 
-            if poss_perdedor >= 54.0 or tiros_perdedor >= 3:
+            if (poss_perdedor >= 56.0 and tiros_perdedor >= 3) or (poss_perdedor >= 62.0 and total_corners >= 5):
                 target_corners = total_corners + 2
                 return NodeEvaluation(
                     node_name="SiegeXGSpecialist",
                     recommended_market=f"Más de {target_corners}.5 Córners Totales",
-                    confidence=76.5,
+                    confidence=81.0,
                     estimated_odd=1.80,
                     rationale=f"{perdedor} pierde por 1 e intensifica el asedio ({poss_perdedor}% posesión, {total_corners} córners actuales).",
                     sentiment="CORNERS_HIGH",
                     signals={"target_corners": target_corners, "corners_now": total_corners, "possession": poss_perdedor}
                 )
 
-        # Heurística 4: Partido de Bloqueo / Cerrojo -> Under 1.5
-        if 42 <= minute <= 65 and total_goles == 0:
-            if total_shots_target <= 2 and total_xg <= 0.55:
+        # Heurística 4: Partido de Bloqueo / Cerrojo -> Under 1.5 (Modo Sniper)
+        if 48 <= minute <= 68 and total_goles == 0:
+            if total_shots_target <= 2 and total_xg <= 0.45:
                 return NodeEvaluation(
                     node_name="SiegeXGSpecialist",
                     recommended_market="Menos de 1.5 Goles (Under 1.5)",
-                    confidence=74.0,
+                    confidence=78.5,
                     estimated_odd=1.70,
                     rationale=f"Bloqueo táctico y cerrojo mutuo: 0-0 en min {minute}, solo {total_shots_target} tiros a puerta y xG {total_xg}.",
                     sentiment="BEARISH_UNDER",
@@ -165,6 +165,7 @@ class SiegeXGSpecialistNode:
 class PoissonEloValueSpecialistNode:
     """
     Especialista Cuantitativo: Ratings Elo, Poisson Bivariado y Value Betting (+EV).
+    Modo Francotirador (Sniper): Solo dispara con alta probabilidad y +EV real.
     """
 
     def __init__(self):
@@ -185,37 +186,37 @@ class PoissonEloValueSpecialistNode:
         odd_draw = state.odds.get("draw")
         odd_away = state.odds.get("away")
 
-        # Evaluar 1X2 con Value Betting
-        if odd_home and probs["home_win"] >= 0.52:
+        # Evaluar 1X2 con Value Betting - MODO SNIPER (Prob >= 65% + EV >= 5% o Prob >= 72%)
+        if odd_home and probs["home_win"] >= 0.65:
             val = calculate_value(probs["home_win"], odd_home)
-            if val["has_value"] or probs["home_win"] >= 0.65:
+            if (val["has_value"] and val.get("ev_pct", 0) >= 5.0) or probs["home_win"] >= 0.72:
                 conf = round(probs["home_win"] * 100.0, 1)
                 return NodeEvaluation(
                     node_name="PoissonEloValueSpecialist",
                     recommended_market=f"Gana Local: {state.home_team}",
                     confidence=conf,
                     estimated_odd=odd_home,
-                    rationale=f"Poisson+Elo: {conf}% prob. (Cuota justa: {val['fair_odd']} | Cuota casa: {odd_home}). EV: +{val['ev_pct']}%.",
+                    rationale=f"Poisson+Elo Sniper: {conf}% prob. (Cuota justa: {val['fair_odd']} | Cuota casa: {odd_home}). EV: +{val['ev_pct']}%.",
                     sentiment="FAVOR_HOME",
                     signals={"value_info": val, "probs": probs, "type": "1X2_HOME"}
                 )
 
-        if odd_away and probs["away_win"] >= 0.48:
+        if odd_away and probs["away_win"] >= 0.60:
             val = calculate_value(probs["away_win"], odd_away)
-            if val["has_value"] or probs["away_win"] >= 0.60:
+            if (val["has_value"] and val.get("ev_pct", 0) >= 5.0) or probs["away_win"] >= 0.68:
                 conf = round(probs["away_win"] * 100.0, 1)
                 return NodeEvaluation(
                     node_name="PoissonEloValueSpecialist",
                     recommended_market=f"Gana Visitante: {state.away_team}",
                     confidence=conf,
                     estimated_odd=odd_away,
-                    rationale=f"Poisson+Elo: {conf}% prob. (Cuota justa: {val['fair_odd']} | Cuota casa: {odd_away}). EV: +{val['ev_pct']}%.",
+                    rationale=f"Poisson+Elo Sniper: {conf}% prob. (Cuota justa: {val['fair_odd']} | Cuota casa: {odd_away}). EV: +{val['ev_pct']}%.",
                     sentiment="FAVOR_AWAY",
                     signals={"value_info": val, "probs": probs, "type": "1X2_AWAY"}
                 )
 
-        # Evaluar Over 2.5 goles
-        if probs["over_2_5"] >= 0.62:
+        # Evaluar Over 2.5 goles (estricto >= 70%)
+        if probs["over_2_5"] >= 0.70:
             conf = round(probs["over_2_5"] * 100.0, 1)
             est_odd = round(1.0 / probs["over_2_5"] * 1.08, 2)
             return NodeEvaluation(
@@ -223,13 +224,13 @@ class PoissonEloValueSpecialistNode:
                 recommended_market="Más de 2.5 Goles",
                 confidence=conf,
                 estimated_odd=est_odd,
-                rationale=f"Poisson proyecta {conf}% prob. de Over 2.5 (Goles esperados del partido: {probs['expected_total_goals']}).",
+                rationale=f"Poisson Sniper: {conf}% prob. de Over 2.5 (Goles esperados: {probs['expected_total_goals']}).",
                 sentiment="BULLISH_OVER",
                 signals={"probs": probs, "type": "OVER_25"}
             )
 
-        # Evaluar Ambos Marcan (BTTS)
-        if probs["btts_yes"] >= 0.60:
+        # Evaluar Ambos Marcan (BTTS) (estricto >= 68%)
+        if probs["btts_yes"] >= 0.68:
             conf = round(probs["btts_yes"] * 100.0, 1)
             est_odd = round(1.0 / probs["btts_yes"] * 1.08, 2)
             return NodeEvaluation(
@@ -237,13 +238,13 @@ class PoissonEloValueSpecialistNode:
                 recommended_market="Ambos Equipos Marcarán: Sí",
                 confidence=conf,
                 estimated_odd=est_odd,
-                rationale=f"Poisson proyecta {conf}% prob. de BTTS (λH={probs['lambda_home']}, λA={probs['lambda_away']}).",
+                rationale=f"Poisson Sniper: {conf}% prob. de BTTS (λH={probs['lambda_home']}, λA={probs['lambda_away']}).",
                 sentiment="BULLISH_OVER",
                 signals={"probs": probs, "type": "BTTS"}
             )
 
-        # Evaluar Doble Oportunidad 1X
-        if probs["double_chance_1x"] >= 0.78:
+        # Evaluar Doble Oportunidad 1X (estricto >= 82%)
+        if probs["double_chance_1x"] >= 0.82:
             conf = round(probs["double_chance_1x"] * 100.0, 1)
             est_odd = round(1.0 / probs["double_chance_1x"] * 1.05, 2)
             return NodeEvaluation(
@@ -251,7 +252,7 @@ class PoissonEloValueSpecialistNode:
                 recommended_market=f"Doble Oportunidad: {state.home_team} o Empate (1X)",
                 confidence=conf,
                 estimated_odd=est_odd,
-                rationale=f"Alta solvencia de local con {conf}% de probabilidad combinada 1X.",
+                rationale=f"Fortaleza extrema de local: {conf}% de probabilidad combinada 1X.",
                 sentiment="FAVOR_HOME",
                 signals={"probs": probs, "type": "1X"}
             )

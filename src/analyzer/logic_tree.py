@@ -15,7 +15,7 @@ class LogicTreeAnalyzer:
     Ratings Elo y Distribución Poisson con detección de Value Bets (EV > 0).
     """
 
-    CONFIANZA_MINIMA = 65.0
+    CONFIANZA_MINIMA = 75.0
 
     # Promedio de goles base por categoría de liga
     GOLES_LIGA_ALTA = 2.75   # Premier, Bundesliga, La Liga, Serie A, Champions

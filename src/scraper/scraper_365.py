@@ -213,10 +213,11 @@ class Scraper365:
             "red_cards": {"home": 0, "away": 0},
         }
 
-    async def fetch_live_matches(self, filter_leagues: bool = True, min_tier: int = 3, fetch_stats: bool = True) -> List[Dict[str, Any]]:
+    async def fetch_live_matches(self, filter_leagues: bool = True, min_tier: int = 2, fetch_stats: bool = True) -> List[Dict[str, Any]]:
         """
         Devuelve partidos EN VIVO (en juego + medio tiempo),
         enriquecidos con cuotas y estadísticas avanzadas en tiempo real.
+        Por defecto filtra por Ligas Tier 1 y Tier 2 (máxima liquidez y fiabilidad).
         """
         games = await self._fetch_games(include_tomorrow=False)
         live = []
@@ -259,10 +260,10 @@ class Scraper365:
         logger.info(f"Partidos en vivo detectados y enriquecidos con estadísticas: {len(live)}")
         return live
 
-    async def fetch_upcoming_matches(self, hours_ahead: int = 4, filter_leagues: bool = True, min_tier: int = 3) -> List[Dict[str, Any]]:
+    async def fetch_upcoming_matches(self, hours_ahead: int = 4, filter_leagues: bool = True, min_tier: int = 2) -> List[Dict[str, Any]]:
         """
         Próximos partidos programados para las siguientes N horas,
-        filtrados por calidad de liga y con cuotas extraídas.
+        filtrados por calidad de liga (Tier 1 y Tier 2) y con cuotas extraídas.
         """
         games = await self._fetch_games(include_tomorrow=True)
         now = datetime.now(tz=BOGOTA_TZ)

@@ -134,6 +134,12 @@ CONFLICTOS ENTRE NODOS:
 CUOTAS DISPONIBLES:
 Local: {state.odds.get('home')}, Empate: {state.odds.get('draw')}, Visitante: {state.odds.get('away')}
 
+CRITERIO DE CALIDAD EXTREMA (MODO FRANCOTIRADOR / SNIPER):
+- Tu meta primordial es CERO fallos y máxima efectividad (Efectividad proyectada > 80%).
+- Preferimos CALIDAD antes que cantidad.
+- Si existe contradicción entre nodos, volatilidad excesiva o falta de datos contundentes, DEBES responder con decision: "REJECT".
+- Solo responde "APPROVE" si la probabilidad y la ventaja táctica son indiscutibles.
+
 INSTRUCCIONES DE SALIDA:
 Responde EXCLUSIVAMENTE en formato JSON con la siguiente estructura:
 {{
@@ -187,24 +193,47 @@ Responde EXCLUSIVAMENTE en formato JSON con la siguiente estructura:
 
     def _deterministic_consensus(self, state: MatchState) -> SupervisorVerdict:
         """
-        Supervisor de Consenso Determinista.
-        Sintetiza la mejor opción mediante reglas de ponderación y resolución de conflictos.
+        Supervisor de Consenso Determinista (Modo Francotirador / Sniper).
+        Prioriza CALIDAD extrema antes que cantidad.
         """
-        # Si hay conflicto crítico con tarjeta roja que anule la ventaja de local/visitante
-        has_red_conflict = any("Roja" in c for c in state.conflicts)
-
         # Ordenar evaluaciones por nivel de confianza
         sorted_evals = sorted(state.evaluations.values(), key=lambda e: e.confidence, reverse=True)
         top_eval = sorted_evals[0]
 
-        # Penalización si hay conflictos no resueltos
-        confidence_penalty = 6.0 if has_red_conflict else (2.5 if state.conflicts else 0.0)
-        final_confidence = max(50.0, top_eval.confidence - confidence_penalty)
+        # 1. Tolerancia cero a conflictos tácticos: si hay contradicciones, RECHAZAR pick
+        if state.conflicts:
+            return SupervisorVerdict(
+                decision="REJECT",
+                selected_market=top_eval.recommended_market,
+                confidence=round(top_eval.confidence, 1),
+                recommended_stake=0,
+                tactical_report=f"Descartado por filtro de calidad Sniper: contradicción táctica ({state.conflicts[0]}).",
+                risk_factors=state.conflicts.copy(),
+                source="DETERMINISTIC",
+                odd_num=top_eval.estimated_odd,
+                odd_str=str(top_eval.estimated_odd)
+            )
+
+        final_confidence = top_eval.confidence
+
+        # 2. Filtro estricto de efectividad mínima: solo se aprueba si confianza >= 78%
+        if final_confidence < 78.0:
+            return SupervisorVerdict(
+                decision="REJECT",
+                selected_market=top_eval.recommended_market,
+                confidence=round(final_confidence, 1),
+                recommended_stake=0,
+                tactical_report=f"Descartado por umbral Sniper: confianza del {final_confidence}% insuficiente para alta efectividad (mínimo 78%).",
+                risk_factors=["Confianza por debajo del umbral de alta efectividad"],
+                source="DETERMINISTIC",
+                odd_num=top_eval.estimated_odd,
+                odd_str=str(top_eval.estimated_odd)
+            )
 
         # Cálculo de Stake
-        if final_confidence >= 80.0:
+        if final_confidence >= 82.0:
             stake = 4
-        elif final_confidence >= 74.0:
+        elif final_confidence >= 78.0:
             stake = 3
         else:
             stake = 2
@@ -213,15 +242,15 @@ Responde EXCLUSIVAMENTE en formato JSON con la siguiente estructura:
         if state.is_live:
             report = (
                 f"Sinergia táctica en Min {state.minute}': {top_eval.rationale} "
-                f"Confirmado por {top_eval.node_name}."
+                f"Confirmado por {top_eval.node_name} (Modo Sniper)."
             )
         else:
             report = (
                 f"Validación estadística pre-partido: {top_eval.rationale} "
-                f"Algoritmo cuantitativo con correlación positiva."
+                f"Algoritmo cuantitativo con alta probabilidad."
             )
 
-        risks = state.conflicts.copy() if state.conflicts else ["Volatilidad estándar del fútbol"]
+        risks = ["Volatilidad estándar del fútbol"]
 
         return SupervisorVerdict(
             decision="APPROVE",
