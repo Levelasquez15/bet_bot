@@ -101,11 +101,14 @@ Para maximizar el *Win-Rate* y proteger el bankroll, BetBot incorpora reglas est
 
 | Comando | Descripción |
 | :--- | :--- |
-| `/start` | Inicia el bot, registra al usuario y abre el menú táctil interactivo. |
+| `/start` | Inicia el bot, registra al usuario y abre el menú del Ayudante. |
 | `/menu` | Despliega el panel de control táctil con botones Inline. |
+| `/corners [equipo]` | 🚩 **Ayudante Córners**: Analiza los últimos 10 partidos de cada equipo, promedios y líneas de valor. |
+| `/jugadores [equipo]` | 🎯 **Ayudante Jugadores**: Consulta alineación (🟢 Oficial / 🟡 Probable), disparos a puerta, tiros y faltas. |
+| `/ayudante [equipo]` | 📋 **Informe Completo**: Combina Córners (10 partidos) + Props de Jugadores. |
+| `/combinada` | 🎰 Genera un ticket combinado inteligente de Córners + Jugadores. |
 | `/jornada` | Muestra el calendario de partidos monitoreados hoy y los activos en vivo. |
-| `/analizar [equipo]` | Ejecuta un análisis táctico profundo bajo demanda con el Director Técnico IA. |
-| `/combinada` | Genera un parlay inteligente de 2 a 3 selecciones con valor matemático (+EV). |
+| `/analizar [equipo]` | Ejecuta un análisis táctico profundo con el Director Técnico IA (Gemini Flash). |
 | `/bankroll` | Muestra la auditoría financiera en vivo: Unidades ganadas (+/- U), ROI / Yield y racha. |
 | `/historial` | Consulta los últimos 10 pronósticos enviados con su resultado auditado. |
 | `/stats` | Métricas históricas de efectividad global por mercado. |
@@ -119,13 +122,14 @@ Para maximizar el *Win-Rate* y proteger el bankroll, BetBot incorpora reglas est
 ```
 bet_bot/
 ├── src/
+│   ├── assistant/          # Ayudante Personal: Córners (10 partidos) y Props de Jugadores
 │   ├── analyzer/           # Árboles heurísticos, lógica combinada y parlays
 │   ├── bot/                # Cliente de Telegram, manejadores táctiles y servidor de salud
 │   ├── db/                 # Repositorios SQLite en modo WAL y esquemas relacionales
 │   ├── graph/              # DecisionGraph, Nodos Especialistas, Gatekeeper y Supervisor IA
 │   ├── models/             # Distribución Poisson, modelo Elo y cálculo de Valor (+EV)
 │   ├── scraper/            # Clientes de 365Scores y Flashscore Fallback
-│   └── worker/             # Tareas en segundo plano (verificación y escaneo periódico)
+│   └── worker/             # Tareas en segundo plano (escaneo, monitor de alineaciones y auditoría)
 ├── tests/                  # Suite integral de pruebas unitarias y de integración
 ├── Dockerfile              # Contenedor de producción optimizado para Python 3.12
 ├── ROADMAP.md              # Hoja de ruta interna y registro de desarrollo

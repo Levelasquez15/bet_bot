@@ -15,6 +15,7 @@ Documento interno de seguimiento de arquitectura, módulos implementados y backl
 | **Módulo 5** | Bot de Telegram Táctil & Notificaciones | ✅ Completado | Tests validados |
 | **Módulo 6** | Despliegue Docker & Render 24/7 con Health Check | ✅ Completado | Producción Activa |
 | **Módulo 7** | Decision Graph Multi-Agente & Gemini Flash | ✅ Completado | Tests validados |
+| **Módulo 8** | Asistente Personal (Córners 10P + Props Jugadores) | ✅ Completado | Tests validados |
 | **Calidad** | Modo Francotirador (Sniper Mode & Anti-Congelamiento) | ✅ Completado | Tests validados |
 
 ---
@@ -77,6 +78,23 @@ Documento interno de seguimiento de arquitectura, módulos implementados y backl
   - Resolución de conflictos entre especialistas contradictorios.
   - Generación de informe táctico natural explicable.
 - [x] **Comando `/analizar [equipo]`** y botón táctil para análisis táctico bajo demanda.
+
+### 🔹 Módulo 8: Asistente Personal de Apuestas (Córners & Props de Jugadores) (`src/assistant/`)
+- [x] **Asistente de Tiros de Esquina (`CornersAssistant`):**
+  - Análisis estadístico de los **últimos 10 partidos anteriores** de cada equipo (no solo H2H, sino contra sus rivales previos).
+  - Cálculo de Córners a Favor (generados), Córners en Contra (concedidos) y Total acumulado por partido.
+  - Tasas de cumplimiento de líneas Over/Under (+8.5, +9.5, +10.5 córners) en la muestra histórica de 10 partidos.
+  - Proyección del partido y sugerencia de líneas seguras totales, líneas individuales y combinada de córners.
+- [x] **Asistente de Mercados de Jugadores (`PlayersAssistant`):**
+  - Detección del estado de alineación: 🟢 Confirmada (Oficial) vs 🟡 Probable / Proyectada.
+  - Extracción de los 11 titulares de ambos equipos y sus formaciones tácticas.
+  - Selección de **Top Disparos a Puerta** (+0.5, +1.5 remates al arco) y **Top Disparos Totales** (+1.5, +2.5).
+  - Selección de **Top Faltas Cometidas** (pivotes defensivos/centrales) y **Faltas Recibidas** (atacantes/extremos).
+  - Sugerencia de combinada de props de jugador.
+- [x] **Operación Híbrida en Telegram & Background Worker:**
+  - Botonera táctil interactiva: `[🚩 Ayudante Córners]`, `[🎯 Disparos & Faltas]`, `[📋 Análisis Completo]`, `[🎰 Combinadas]`.
+  - Comandos directos: `/corners [equipo]`, `/jugadores [equipo]`, `/ayudante [equipo]`.
+  - Tarea en segundo plano (`lineup_monitor_job`): escaneo cada 2 min y envío automático de alerta a suscriptores cuando se confirma la alineación oficial de partidos top.
 
 ### 🔹 Módulo de Calidad: Modo Francotirador & Anti-Congelamiento
 - [x] **Modo Francotirador (Sniper Mode):** Umbral mínimo de confianza elevado al $78\%$, cero tolerancia a conflictos tácticos y filtro prioritario en Ligas Tier 1 y 2.

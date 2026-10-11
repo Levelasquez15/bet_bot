@@ -35,6 +35,9 @@ def test_imports():
     import src.graph.gatekeeper
     import src.graph.supervisor
     import src.graph.decision_graph
+    import src.assistant.corners_assistant
+    import src.assistant.players_assistant
+    import src.assistant.assistant_facade
     print("✅ Todos los módulos se importan correctamente.")
 
 

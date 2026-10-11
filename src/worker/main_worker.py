@@ -9,9 +9,13 @@ from src.worker.result_checker import setup_result_checker
 
 from src.graph.decision_graph import DecisionGraph
 
+from src.assistant import BetAssistant, format_lineup_alert
+
 logger = logging.getLogger(__name__)
 
 _sent_picks: set = set()
+_sent_lineup_alerts: set = set()
+assistant = BetAssistant(limit_corners_matches=10)
 
 
 def format_live_pick(pick: dict) -> str:
@@ -139,8 +143,75 @@ async def scraping_job(context: ContextTypes.DEFAULT_TYPE) -> None:
         logger.info("━━━ Ciclo completado ━━━")
 
 
+async def lineup_monitor_job(context: ContextTypes.DEFAULT_TYPE) -> None:
+    """
+    Escanea partidos de Ligas Top (Champions League, Premier, LaLiga, Serie A, Libertadores)
+    y notifica inmediatamente a los suscriptores cuando se confirma la alineación oficial.
+    """
+    global _sent_lineup_alerts
+    scraper = Scraper365()
+    try:
+        upcoming = await scraper.fetch_upcoming_matches(hours_ahead=2, min_tier=2)
+        subscribers = get_active_subscribers_for_type("upcoming")
+        if not subscribers or not upcoming:
+            return
+
+        for g in upcoming:
+            gid = g.get("id")
+            if not gid or gid in _sent_lineup_alerts:
+                continue
+
+            if not (g.get("hasLineups") or g.get("lineupsStatus") == 3):
+                continue
+
+            game_obj = await scraper.fetch_game_by_id(gid)
+            if not game_obj:
+                continue
+
+            h_c = game_obj.get("homeCompetitor", {})
+            a_c = game_obj.get("awayCompetitor", {})
+            h_stat = str(h_c.get("lineups", {}).get("status", "")).capitalize()
+            a_stat = str(a_c.get("lineups", {}).get("status", "")).capitalize()
+
+            if h_stat == "Confirmado" or a_stat == "Confirmado":
+                _sent_lineup_alerts.add(gid)
+                hid = h_c.get("id")
+                aid = a_c.get("id")
+                hn = h_c.get("name", "Local")
+                an = a_c.get("name", "Visitante")
+                comp = game_obj.get("competitionDisplayName") or "Liga Top"
+                st = game_obj.get("startTime", "")[11:16] or "Pronto"
+
+                full_res = await assistant.analyze_full_match(
+                    scraper.session, gid, hid, aid, hn, an, game_obj=game_obj
+                )
+                msg = format_lineup_alert(
+                    f"{hn} vs {an}", comp, st, full_res["players"], full_res["corners"]
+                )
+
+                sent_count = 0
+                for chat_id in subscribers:
+                    try:
+                        await context.bot.send_message(chat_id=chat_id, text=msg, parse_mode="HTML")
+                        sent_count += 1
+                    except Exception as e:
+                        logger.error(f"Error enviando alerta de alineación a {chat_id}: {e}")
+
+                logger.info(f"🚨 Alerta de alineación oficial enviada a {sent_count} usuarios: {hn} vs {an}")
+
+    except Exception as e:
+        logger.error(f"Error en lineup_monitor_job: {e}", exc_info=True)
+    finally:
+        await scraper.close()
+
+    if len(_sent_lineup_alerts) > 500:
+        _sent_lineup_alerts.clear()
+
+
 def setup_worker(app) -> None:
-    """Registra el worker principal y el verificador de resultados."""
+    """Registra el worker principal, el monitor de alineaciones confirmadas y el verificador de resultados."""
     app.job_queue.run_repeating(scraping_job, interval=120, first=15)
+    app.job_queue.run_repeating(lineup_monitor_job, interval=120, first=30)
     setup_result_checker(app)
-    logger.info("⚙️  Workers activos: Scraping (2min) + Result Checker (10min).")
+    logger.info("⚙️  Workers activos: Scraping (2min) + Lineup Monitor (2min) + Result Checker (10min).")
+

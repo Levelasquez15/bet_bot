@@ -374,6 +374,54 @@ class Scraper365:
         logger.info(f"Próximos partidos en las próximas {hours_ahead}h: {len(upcoming)}")
         return upcoming
 
+    async def fetch_game_by_id(self, game_id: int) -> Dict[str, Any]:
+        """Consulta los detalles completos de un partido por su ID (incluye lineups y recentMatches)."""
+        try:
+            url = f"https://webws.365scores.com/web/game/?gameId={game_id}&langId=29&appTypeId=5"
+            resp = await self.session.get(url, timeout=15.0)
+            if resp.status_code == 200:
+                data = resp.json()
+                return data.get("game", {})
+        except Exception as e:
+            logger.error(f"Error consultando partido {game_id}: {e}")
+        return {}
+
+    async def fetch_assistant_matches(self, hours_ahead: int = 24, min_tier: int = 2) -> List[Dict[str, Any]]:
+        """
+        Retorna partidos relevantes (Ligas Top y Sudamericanas) tanto en vivo
+        como programados en las próximas N horas para el asistente.
+        """
+        games = await self._fetch_games(include_tomorrow=True)
+        now = datetime.now(tz=BOGOTA_TZ)
+        limit = now + timedelta(hours=hours_ahead)
+        filtered = []
+
+        for g in games:
+            if not is_valid_match(g, min_tier=min_tier):
+                continue
+
+            status_group = g.get("statusGroup")
+            status_text = str(g.get("statusText", "")).strip().lower()
+
+            # En vivo
+            if status_group == STATUS_LIVE or status_text in ("primer tiempo", "segundo tiempo", "entretiempo", "mt"):
+                g["is_live"] = True
+                filtered.append(g)
+                continue
+
+            # Próximos
+            if status_group in (STATUS_UPCOMING, STATUS_SCHEDULED) or status_text == "prog.":
+                start_str = g.get("startTime", "")
+                try:
+                    start_dt = datetime.fromisoformat(start_str)
+                    if now <= start_dt <= limit:
+                        g["is_live"] = False
+                        filtered.append(g)
+                except Exception:
+                    continue
+
+        return filtered
+
     async def fetch_all_for_debug(self) -> dict:
         """Devuelve diagnóstico completo del estado del scraper y datos en tiempo real."""
         games = await self._fetch_games(include_tomorrow=True)
