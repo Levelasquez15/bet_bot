@@ -27,6 +27,11 @@ from src.assistant.assistant_facade import (
     format_full_match_report,
     format_lineup_alert
 )
+from src.bot.telegram_client import (
+    get_main_menu_keyboard,
+    build_assistant_matches_keyboard,
+    get_assistant_navigation_keyboard
+)
 
 
 class TestAssistantSuite(unittest.IsolatedAsyncioTestCase):
@@ -209,6 +214,42 @@ class TestAssistantSuite(unittest.IsolatedAsyncioTestCase):
         # 4. Alerta de Alineación
         alert_msg = format_lineup_alert("PSG vs Barcelona", "Champions League", "14:00", players_data, corners_data)
         self.assertIn("ALINEACIÓN OFICIAL CONFIRMADA", alert_msg)
+
+    async def test_assistant_keyboards(self):
+        """Valida que los teclados del menú principal y de navegación se construyan correctamente."""
+        main_kb = get_main_menu_keyboard()
+        cb_data_list = [btn.callback_data for row in main_kb.inline_keyboard for btn in row]
+        self.assertIn("btn_oficiales_1h", cb_data_list)
+        self.assertIn("btn_horas_antes", cb_data_list)
+        self.assertIn("btn_partidos_hoy", cb_data_list)
+        self.assertIn("btn_ayudante_corners", cb_data_list)
+        self.assertIn("btn_ayudante_players", cb_data_list)
+
+        nav_kb = get_assistant_navigation_keyboard("9999", "corners")
+        nav_cbs = [btn.callback_data for row in nav_kb.inline_keyboard for btn in row]
+        self.assertIn("ply_9999", nav_cbs)
+        self.assertIn("ful_9999", nav_cbs)
+        self.assertIn("btn_main_menu", nav_cbs)
+
+        # Probar generación de teclados de partidos con mock
+        mock_game = {
+            "id": 1234,
+            "homeCompetitor": {"name": "Real Madrid", "id": 10},
+            "awayCompetitor": {"name": "Barcelona", "id": 20},
+            "competitionDisplayName": "LaLiga",
+            "startTime": "2026-10-11T16:00:00Z",
+            "time_left_str": "en 45m",
+            "is_lineup_confirmed": True
+        }
+        with patch("src.scraper.scraper_365.Scraper365.fetch_assistant_matches", new_callable=AsyncMock) as mock_matches:
+            mock_matches.return_value = [mock_game]
+            txt_oficial, kb_oficial = await build_assistant_matches_keyboard("oficiales")
+            self.assertIn("ALINEACIONES OFICIALES", txt_oficial)
+            oficial_cbs = [btn.callback_data for row in kb_oficial.inline_keyboard for btn in row]
+            self.assertIn("ply_1234", oficial_cbs)
+
+            txt_horas, kb_horas = await build_assistant_matches_keyboard("horas_antes")
+            self.assertIn("PRE-PARTIDO HORAS ANTES", txt_horas)
 
 
 if __name__ == "__main__":

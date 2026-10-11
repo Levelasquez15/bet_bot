@@ -124,12 +124,39 @@ def format_players_report(data: Dict[str, Any]) -> str:
     form_h = data.get("formation_home", "N/D")
     form_a = data.get("formation_away", "N/D")
 
+    note_text = (
+        "⚡ <i>Once titular oficial verificado. Los jugadores listados arrancan desde el pitazo inicial.</i>"
+        if data.get("is_confirmed")
+        else "💡 <i>Análisis previo (horas antes). Once habitual basado en partidos anteriores. La confirmación oficial sale ~60 min antes.</i>"
+    )
+
     lines = [
         "🎯 <b>AYUDANTE DE JUGADORES (TIROS & FALTAS)</b> 🎯",
         f"⚽ <b>{data['match']}</b>",
-        f"📋 Estado de Alineación: <b>{status_badge}</b>",
-        f"📐 Formaciones: {form_h} vs {form_a}\n",
+        f"📋 Estado: <b>{status_badge}</b>",
+        f"📐 Formaciones: {form_h} vs {form_a}",
+        f"{note_text}\n",
     ]
+
+    # Lista de Jugadores Titulares (Oficiales o Habituales)
+    h_names = [s.get("name") for s in data.get("home_starters", []) if s.get("name")]
+    a_names = [s.get("name") for s in data.get("away_starters", []) if s.get("name")]
+    parts = data.get("match", "").split(" vs ")
+    h_team = parts[0] if len(parts) > 0 else "Local"
+    a_team = parts[1] if len(parts) > 1 else "Visitante"
+
+    if h_names or a_names:
+        title_starters = (
+            "👥 <b>ONCE TITULAR OFICIAL:</b>"
+            if data.get("is_confirmed")
+            else "👥 <b>ONCE HABITUAL (PARTIDOS RECIENTES):</b>"
+        )
+        lines.append(title_starters)
+        if h_names:
+            lines.append(f"🏠 <b>{h_team} ({form_h}):</b>\n  <i>{', '.join(h_names[:11])}</i>")
+        if a_names:
+            lines.append(f"✈️ <b>{a_team} ({form_a}):</b>\n  <i>{', '.join(a_names[:11])}</i>")
+        lines.append("")
 
     # 1. Tiros a Puerta
     lines.append("🎯 <b>TOP DISPAROS A PUERTA (REMATES AL ARCO):</b>")

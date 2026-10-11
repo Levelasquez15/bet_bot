@@ -51,11 +51,15 @@ STATUS_EMOJI = {
 
 
 def get_main_menu_keyboard() -> InlineKeyboardMarkup:
-    """Genera la botonera táctil principal para la navegación de los usuarios."""
+    """Genera la botonera táctil principal optimizada para el Ayudante Pre-Partido."""
     return InlineKeyboardMarkup([
         [
-            InlineKeyboardButton("🚩 Ayudante Córners (10 Partidos)", callback_data="btn_ayudante_corners"),
-            InlineKeyboardButton("🎯 Disparos & Faltas Jugador", callback_data="btn_ayudante_players"),
+            InlineKeyboardButton("🚩 Córners (Historial 10P)", callback_data="btn_ayudante_corners"),
+            InlineKeyboardButton("🎯 Disparos & Faltas", callback_data="btn_ayudante_players"),
+        ],
+        [
+            InlineKeyboardButton("🟢 Oficiales Confirmadas (~1h)", callback_data="btn_oficiales_1h"),
+            InlineKeyboardButton("🟡 Horas Antes (Once Habitual)", callback_data="btn_horas_antes"),
         ],
         [
             InlineKeyboardButton("📋 Análisis Completo Partido", callback_data="btn_ayudante_full"),
@@ -110,14 +114,14 @@ async def start_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> N
 
     welcome_text = (
         rf"¡Hola {user.mention_html()}! Soy <b>BetBot Ayudante</b> 🤖⚽"
-        "\n\nTu <b>asistente personal de apuestas deportivas</b> especializado en tu estrategia:"
+        "\n\nTu <b>asistente personal de pronósticos pre-partido</b> especializado en tu estrategia:"
         "\n\n🚩 <b>Tiros de Esquina (Córners):</b>"
-        "\n  • Análisis de los últimos 10 partidos anteriores de cada equipo"
-        "\n  • Córners a favor, en contra, promedios y líneas seguras/combinadas"
+        "\n  • Historial y promedios de los <b>últimos 10 partidos</b> de cada equipo"
+        "\n  • Córners a favor, en contra, promedios y líneas recomendadas"
         "\n\n🎯 <b>Mercados de Jugadores (Props):</b>"
-        "\n  • Detección de alineación oficial (🟢 Confirmada) o 🟡 Probable"
-        "\n  • Disparos de jugador (Tiros totales) y Disparos a puerta (Remates al arco)"
-        "\n  • Faltas cometidas y recibidas por jugador"
+        "\n  • <b>🟢 A ~1 Hora del Partido:</b> Con alineación oficial confirmada (11 titulares exactos)."
+        "\n  • <b>🟡 Horas Antes:</b> Análisis previo con el Once Habitual según partidos anteriores."
+        "\n  • Disparos totales (+1.5, +2.5), Remates al arco (+0.5, +1.5) y Faltas (+1.5)."
         "\n\n🏆 <b>Cobertura:</b> Champions League, Ligas Top Europeas y Sudamericanas (Brasileirão, Libertadores)"
         "\n\n👇 <i>Selecciona una opción del panel táctil para comenzar:</i>"
     )
@@ -139,17 +143,17 @@ async def status_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
     subs  = get_subscribers()
     stats = get_stats()
     text = (
-        "📊 <b>Estado del Motor BetBot</b>\n\n"
+        "📊 <b>Estado del Motor BetBot Ayudante</b>\n\n"
         "✅ Ingestión 365scores: ACTIVO\n"
-        "✅ Análisis en Vivo (Stats xG + Tiros + Córners): ACTIVO\n"
-        "✅ Análisis Próximos (Poisson + Elo + Kelly): ACTIVO\n"
-        "✅ Generador de Combinadas (+EV): ACTIVO\n"
-        "✅ Base de Datos Relacional SQLite WAL: ACTIVO\n"
-        "✅ Verificación de Resultados: ACTIVO\n"
+        "✅ Ayudante de Córners (Historial 10 Partidos): ACTIVO\n"
+        "✅ Props de Jugadores (Tiros Totales, Arco & Faltas): ACTIVO\n"
+        "✅ Detección de Alineaciones Oficiales (~1h): ACTIVO\n"
+        "✅ Once Habitual Histórico (Horas Antes): ACTIVO\n"
+        "✅ Verificación Automática de Resultados: ACTIVO\n"
         f"👥 Suscriptores Registrados: {len(subs)}\n"
         f"📈 Pronósticos Totales: {stats['total']}\n"
         f"🏆 Efectividad: {stats['efectividad']}%\n"
-        "⏱️ Ciclos: 2min (escaneo) | 10min (verificación)"
+        "⏱️ Monitor de Alineaciones: cada 2 min"
     )
     if update.callback_query:
         await update.callback_query.edit_message_text(text, parse_mode="HTML", reply_markup=get_back_keyboard())
@@ -308,72 +312,59 @@ async def combinada_command(update: Update, context: ContextTypes.DEFAULT_TYPE) 
 
 
 async def jornada_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    """Muestra el calendario de partidos monitoreados para hoy y en vivo."""
+    """Muestra el calendario de partidos pre-partido monitoreados para hoy con estado de alineación."""
     scraper = Scraper365()
     try:
-        live = await scraper.fetch_live_matches(filter_leagues=True, fetch_stats=False)
-        upcoming = await scraper.fetch_upcoming_matches(hours_ahead=12, filter_leagues=True)
+        games = await scraper.fetch_assistant_matches(hours_ahead=24, min_tier=2)
 
-        lines = ["📅 <b>JORNADA DE FÚTBOL MONITOREADA HOY</b> 📅\n"]
+        lines = [
+            "⚽ <b>PARTIDOS Y ALINEACIONES DE HOY (PRE-PARTIDO)</b> ⚽\n",
+            "Monitoreo exclusivo de ligas destacadas: Champions League, Premier, LaLiga, Serie A, Bundesliga, Ligue 1, Brasileirão, Libertadores.\n",
+            "🟢 <b>Alineaciones Oficiales (~1h antes):</b> Los 11 titulares confirmados al 100%.",
+            "🟡 <b>Horas Antes (Once Habitual):</b> Proyección anticipada con los titulares más repetidos en sus últimos partidos.\n"
+        ]
 
-        truly_live = []
-        now_cur = datetime.now(tz=BOGOTA_TZ)
-        for g in live:
-            try:
-                gt = float(g.get("gameTime", 0))
-            except (ValueError, TypeError):
-                gt = 0.0
-            gtd = str(g.get("gameTimeDisplay", "")).strip()
-            if gt >= 88.0 or gtd in ("90'", "90+", "Fin", "Finalizado"):
-                continue
+        buttons = [
+            [
+                InlineKeyboardButton("🟢 Solo Confirmadas (~1h)", callback_data="btn_oficiales_1h"),
+                InlineKeyboardButton("🟡 Horas Antes (Once Habitual)", callback_data="btn_horas_antes")
+            ]
+        ]
 
-            start_str = g.get("startTime", "")
-            if start_str:
-                try:
-                    start_dt = datetime.fromisoformat(start_str)
-                    elapsed = (now_cur - start_dt).total_seconds() / 60.0
-                    if elapsed > 125.0 or (elapsed > 75.0 and gt <= 45.0):
-                        continue
-                except Exception:
-                    pass
-
-            truly_live.append(g)
-
-        if truly_live:
-            lines.append("🔴 <b>PARTIDOS EN VIVO AHORA:</b>")
-            for g in truly_live[:6]:
-                h = g.get("homeCompetitor", {}).get("name", "")
-                a = g.get("awayCompetitor", {}).get("name", "")
-                try:
-                    sh = int(float(g.get("homeCompetitor", {}).get("score", 0)))
-                    sa = int(float(g.get("awayCompetitor", {}).get("score", 0)))
-                except (ValueError, TypeError):
-                    sh, sa = 0, 0
-                min_str = str(g.get("gameTimeDisplay") or g.get("gameTime") or "Live").replace("'", "")
-                lines.append(f"  • {h} {sh}-{sa} {a} ⏱️ ({min_str}')")
-            lines.append("")
-
-        if upcoming:
-            lines.append("⏳ <b>PRÓXIMOS DESTACADOS:</b>")
-            for g in upcoming[:8]:
-                h = g.get("homeCompetitor", {}).get("name", "")
-                a = g.get("awayCompetitor", {}).get("name", "")
+        if games:
+            lines.append("📋 <b>Próximos Partidos Programados:</b>")
+            for g in games[:8]:
+                gid = str(g.get("id"))
+                h = g.get("homeCompetitor", {}).get("name", "")[:12]
+                a = g.get("awayCompetitor", {}).get("name", "")[:12]
+                comp = g.get("competitionDisplayName") or ""
+                comp_short = comp[:10]
                 st = g.get("startTime", "")[11:16] if g.get("startTime") else "Hoy"
-                lines.append(f"  • <b>{h} vs {a}</b> 🕐 {st}")
+                time_left = g.get("time_left_str", "")
+                badge = "🟢" if g.get("is_lineup_confirmed") else "🟡"
+                time_disp = f"{st} · {time_left}" if time_left else st
+
+                lines.append(f"  • {badge} <b>{h} vs {a}</b> 🕐 {time_disp} <i>[{comp_short}]</i>")
+                buttons.append([InlineKeyboardButton(f"{badge} {h} vs {a} ({time_disp})", callback_data=f"ply_{gid}")])
+
+            lines.append("\n👉 <i>Toca un partido para consultar su alineación (oficial o habitual) y props de jugadores/córners.</i>")
         else:
-            lines.append("Sin más partidos programados en las próximas 12 horas.")
+            lines.append("⏳ <i>No hay partidos programados en las próximas 24 horas para las ligas monitoreadas.</i>")
+
+        buttons.append([InlineKeyboardButton("🔙 Volver al Menú Principal", callback_data="btn_main_menu")])
 
         msg = "\n".join(lines)
         if update.callback_query:
-            await update.callback_query.edit_message_text(msg, parse_mode="HTML", reply_markup=get_back_keyboard())
+            await update.callback_query.edit_message_text(msg, parse_mode="HTML", reply_markup=InlineKeyboardMarkup(buttons))
         elif update.message:
-            await update.message.reply_html(msg, reply_markup=get_back_keyboard())
+            await update.message.reply_html(msg, reply_markup=InlineKeyboardMarkup(buttons))
     except Exception as e:
         logger.error(f"Error en jornada_command: {e}", exc_info=True)
+        err_msg = f"❌ Error consultando partidos de hoy: {e}"
         if update.callback_query:
-            await update.callback_query.edit_message_text(f"❌ Error consultando jornada: {e}", reply_markup=get_back_keyboard())
+            await update.callback_query.edit_message_text(err_msg, reply_markup=get_back_keyboard())
         elif update.message:
-            await update.message.reply_text(f"❌ Error consultando jornada: {e}")
+            await update.message.reply_text(err_msg, reply_markup=get_back_keyboard())
     finally:
         await scraper.close()
 
@@ -697,15 +688,23 @@ async def build_assistant_matches_keyboard(action_type: str = "corners") -> tupl
     """Genera la botonera táctil para seleccionar un partido a analizar con el Ayudante."""
     scraper = Scraper365()
     try:
-        games = await scraper.fetch_assistant_matches(hours_ahead=24, min_tier=2)
+        only_confirmed = (action_type == "oficiales")
+        hours_ahead = 4 if action_type == "oficiales" else 24
+        games = await scraper.fetch_assistant_matches(hours_ahead=hours_ahead, min_tier=2, only_confirmed=only_confirmed)
+
+        if action_type == "horas_antes":
+            games = [g for g in games if not g.get("is_lineup_confirmed")]
+
         buttons = []
 
         title_map = {
-            "corners": ("🚩 <b>AYUDANTE DE CÓRNERS (10 PARTIDOS)</b> 🚩", "crn"),
-            "players": ("🎯 <b>AYUDANTE DE JUGADORES (TIROS & FALTAS)</b> 🎯", "ply"),
-            "full":    ("📋 <b>ANÁLISIS COMPLETO (CÓRNERS + PROPS)</b> 📋", "ful")
+            "corners":     ("🚩 <b>AYUDANTE DE CÓRNERS (10 PARTIDOS)</b> 🚩", "crn", "Análisis estadístico sobre los últimos 10 partidos de cada equipo.\n\nSelecciona un partido próximo:"),
+            "players":     ("🎯 <b>AYUDANTE DE JUGADORES (TIROS & FALTAS)</b> 🎯", "ply", "🟢 = Alineación Oficial (~1h) | 🟡 = Once Habitual (Horas antes)\n\nSelecciona un partido próximo:"),
+            "full":        ("📋 <b>ANÁLISIS COMPLETO (CÓRNERS + PROPS)</b> 📋", "ful", "Dossier completo: Córners (10 partidos) + Alineaciones y Props de Jugadores.\n\nSelecciona un partido próximo:"),
+            "oficiales":   ("🟢 <b>ALINEACIONES OFICIALES CONFIRMADAS (~1H)</b> 🟢", "ply", "Partidos a punto de empezar con los 11 titulares 100% confirmados por las ligas.\n\nSelecciona un partido para ver sus alineaciones y tiros/faltas:"),
+            "horas_antes": ("🟡 <b>PRE-PARTIDO HORAS ANTES (ONCE HABITUAL)</b> 🟡", "ply", "Partidos de hoy programados con antelación. Análisis previo con alineación probable y el Once Habitual (últimos 2-3 partidos).\n\nSelecciona un partido:")
         }
-        header_title, prefix = title_map.get(action_type, title_map["corners"])
+        header_title, prefix, subtitle = title_map.get(action_type, title_map["corners"])
 
         if games:
             for g in games[:8]:
@@ -714,31 +713,49 @@ async def build_assistant_matches_keyboard(action_type: str = "corners") -> tupl
                 a = g.get("awayCompetitor", {}).get("name", "")[:12]
                 comp = g.get("competitionDisplayName") or ""
                 comp_short = comp[:10]
+                st = g.get("startTime", "")[11:16] if g.get("startTime") else "Hoy"
+                time_left = g.get("time_left_str", "")
+                badge = "🟢" if g.get("is_lineup_confirmed") else "🟡"
+                time_disp = f"{st} · {time_left}" if time_left else st
 
-                if g.get("is_live"):
-                    min_str = str(g.get("gameTimeDisplay") or g.get("gameTime") or "Live").replace("'", "")
-                    btn_text = f"🔴 {h} vs {a} ({min_str}') [{comp_short}]"
-                else:
-                    st = g.get("startTime", "")[11:16] if g.get("startTime") else "Hoy"
-                    lineup_badge = "🟢" if g.get("lineupsStatus") == 3 or g.get("hasLineups") else "🟡"
-                    btn_text = f"{lineup_badge} {h} vs {a} ({st}) [{comp_short}]"
-
+                btn_text = f"{badge} {h} vs {a} ({time_disp}) [{comp_short}]"
                 buttons.append([InlineKeyboardButton(btn_text, callback_data=f"{prefix}_{gid}")])
+
+        # Botones de navegación contextuales
+        nav_row = []
+        if action_type == "oficiales":
+            nav_row.append(InlineKeyboardButton("🟡 Ver Horas Antes (Once Habitual)", callback_data="btn_horas_antes"))
+        elif action_type == "horas_antes":
+            nav_row.append(InlineKeyboardButton("🟢 Ver Oficiales (~1h)", callback_data="btn_oficiales_1h"))
+        elif action_type in ("corners", "players", "full"):
+            nav_row.append(InlineKeyboardButton("⚽ Todos los Partidos Hoy", callback_data="btn_partidos_hoy"))
+
+        if nav_row:
+            buttons.append(nav_row)
 
         buttons.append([InlineKeyboardButton("🔙 Volver al Menú Principal", callback_data="btn_main_menu")])
 
         if not games:
-            text = (
-                f"{header_title}\n\n"
-                "No hay partidos destacados programados en las próximas horas.\n"
-                "Puedes buscar cualquier partido directamente escribiendo:\n"
-                f"• <code>/{action_type} [equipo]</code> (ej: <code>/{action_type} Real Madrid</code>)"
-            )
+            if action_type == "oficiales":
+                text = (
+                    f"{header_title}\n\n"
+                    "⏳ <i>Actualmente no hay partidos que comiencen en la próxima hora con alineación oficial publicada.</i>\n\n"
+                    "📌 <b>¿Cuándo salen las alineaciones?</b>\n"
+                    "Las ligas y clubes oficiales publican sus 11 titulares entre <b>45 y 60 minutos antes</b> del pitazo inicial.\n\n"
+                    "💡 <b>¿Quieres planificar con antelación?</b>\n"
+                    "Consulta los partidos en la sección <b>Horas Antes (Once Habitual)</b> para proyectar con los titulares más repetidos en sus últimos partidos."
+                )
+            else:
+                text = (
+                    f"{header_title}\n\n"
+                    "No hay partidos programados en las próximas horas para las ligas monitoreadas.\n"
+                    "Puedes buscar cualquier partido directamente escribiendo:\n"
+                    f"• <code>/{action_type} [equipo]</code> (ej: <code>/{action_type} Real Madrid</code>)"
+                )
         else:
             text = (
                 f"{header_title}\n\n"
-                "🟢 = Alineación Confirmada | 🟡 = Alineación Probable\n\n"
-                "Selecciona un partido para ver las proyecciones y líneas de valor:"
+                f"{subtitle}"
             )
 
         return text, InlineKeyboardMarkup(buttons)
@@ -759,7 +776,7 @@ def get_assistant_navigation_keyboard(gid: str, current_view: str) -> InlineKeyb
     return InlineKeyboardMarkup([
         row,
         [
-            InlineKeyboardButton("🔙 Lista de Partidos", callback_data=f"btn_ayudante_{current_view if current_view in ('corners', 'players') else 'corners'}"),
+            InlineKeyboardButton("⚽ Volver a Partidos", callback_data="btn_partidos_hoy"),
             InlineKeyboardButton("🏠 Menú", callback_data="btn_main_menu")
         ]
     ])
@@ -997,6 +1014,14 @@ async def button_callback_handler(update: Update, context: ContextTypes.DEFAULT_
 
     elif data == "btn_ayudante_players":
         text, keyboard = await build_assistant_matches_keyboard("players")
+        await query.edit_message_text(text, parse_mode="HTML", reply_markup=keyboard)
+
+    elif data == "btn_oficiales_1h":
+        text, keyboard = await build_assistant_matches_keyboard("oficiales")
+        await query.edit_message_text(text, parse_mode="HTML", reply_markup=keyboard)
+
+    elif data == "btn_horas_antes":
+        text, keyboard = await build_assistant_matches_keyboard("horas_antes")
         await query.edit_message_text(text, parse_mode="HTML", reply_markup=keyboard)
 
     elif data == "btn_ayudante_full":

@@ -66,19 +66,33 @@ class PlayersAssistant:
         formation_home = h_lineup.get("formation", "N/D")
         formation_away = a_lineup.get("formation", "N/D")
 
-        # Extraer jugadores titulares
+        # Extraer jugadores titulares si ya están definidos en el partido
         h_starters = self._extract_starters(h_lineup, members_map)
         a_starters = self._extract_starters(a_lineup, members_map)
 
-        # Si aún no hay alineación cargada, extraer jugadores clave de la plantilla
-        if not h_starters:
-            h_starters = self._fallback_key_players(all_members, home_id)
-        if not a_starters:
-            a_starters = self._fallback_key_players(all_members, away_id)
-
-        # Consultar estadísticas de los últimos partidos para enriquecer a los jugadores
+        # Consultar IDs de los últimos partidos jugados por ambos equipos
         h_recent_ids = home_comp.get("recentMatches", [])[:5]
         a_recent_ids = away_comp.get("recentMatches", [])[:5]
+
+        # Si aún no hay alineación confirmada (análisis horas antes), extraer el Once Habitual de partidos previos
+        if not h_starters:
+            h_starters, form_h_recent = await self._fetch_habitual_starting_11(
+                client, h_recent_ids, home_id, all_members
+            )
+            if formation_home == "N/D" and form_h_recent:
+                formation_home = form_h_recent
+
+        if not a_starters:
+            a_starters, form_a_recent = await self._fetch_habitual_starting_11(
+                client, a_recent_ids, away_id, all_members
+            )
+            if formation_away == "N/D" and form_a_recent:
+                formation_away = form_a_recent
+
+        if is_confirmed:
+            lineup_status_text = "🟢 Confirmada Oficial (Once titular ~1h antes)"
+        else:
+            lineup_status_text = "🟡 Probable (Once habitual según partidos anteriores)"
 
         # Enriquecer métricas de jugadores con datos históricos recientes
         enriched_home = await self._enrich_players_stats(client, h_starters, h_recent_ids, home_id)
@@ -120,7 +134,6 @@ class PlayersAssistant:
                 mid = m.get("id")
                 name = members_map.get(mid, m.get("name", "Titular"))
                 pos = m.get("position", {}).get("name", "Jugador")
-                # Extraer stats directas del partido si están disponibles
                 stats = {s.get("name"): s.get("value") for s in m.get("stats", [])}
                 starters.append({
                     "id": mid,
@@ -130,8 +143,87 @@ class PlayersAssistant:
                 })
         return starters
 
+    async def _fetch_habitual_starting_11(
+        self,
+        client: httpx.AsyncClient,
+        recent_ids: List[int],
+        team_id: int,
+        all_members: list
+    ) -> tuple[List[Dict[str, Any]], str]:
+        """
+        Para análisis horas antes del partido (sin alineación confirmada):
+        Examina las alineaciones titulares que el equipo utilizó en sus últimos 2-3 partidos
+        y construye el Once Habitual basándose en el historial reciente.
+        """
+        starters_dict: Dict[str, Dict[str, Any]] = {}
+        last_formation = ""
+
+        if recent_ids:
+            tasks = [
+                client.get(
+                    f"https://webws.365scores.com/web/game/?gameId={gid}&langId=29&appTypeId=5",
+                    timeout=10.0
+                )
+                for gid in recent_ids[:3]
+            ]
+            responses = await asyncio.gather(*tasks, return_exceptions=True)
+
+            for r in responses:
+                if isinstance(r, Exception) or not hasattr(r, "status_code") or r.status_code != 200:
+                    continue
+                try:
+                    g_data = r.json().get("game", {})
+                    h_c = g_data.get("homeCompetitor", {})
+                    a_c = g_data.get("awayCompetitor", {})
+                    target_comp = h_c if h_c.get("id") == team_id else a_c
+                    lineup = target_comp.get("lineups", {})
+                    members_map = {m["id"]: m for m in g_data.get("members", [])}
+
+                    if not last_formation and lineup.get("formation"):
+                        last_formation = str(lineup.get("formation"))
+
+                    for m in lineup.get("members", []):
+                        if m.get("statusText") == "Starting" or m.get("status") == 1:
+                            mid = m.get("id")
+                            m_obj = members_map.get(mid, m)
+                            name = m_obj.get("name", f"Jugador_{mid}")
+                            pos = m.get("position", {}).get("name", "Jugador")
+                            stats = {s.get("name"): s.get("value") for s in m.get("stats", [])}
+
+                            if name not in starters_dict:
+                                starters_dict[name] = {
+                                    "id": mid,
+                                    "name": name,
+                                    "position": pos,
+                                    "starts_count": 0,
+                                    "stats": stats
+                                }
+                            starters_dict[name]["starts_count"] += 1
+                except Exception as e:
+                    logger.debug(f"Error extrayendo titulares habituales: {e}")
+
+        sorted_starters = sorted(starters_dict.values(), key=lambda x: x["starts_count"], reverse=True)
+        final_starters = sorted_starters[:11]
+
+        # Si faltan cupos para 11, rellenar con plantilla general
+        if len(final_starters) < 11:
+            existing_names = {s["name"].lower() for s in final_starters}
+            for m in all_members:
+                if m.get("competitorId") == team_id and m.get("name", "").lower() not in existing_names:
+                    final_starters.append({
+                        "id": m.get("id"),
+                        "name": m.get("name", "Jugador"),
+                        "position": "Plantilla",
+                        "starts_count": 1,
+                        "stats": {}
+                    })
+                    if len(final_starters) >= 11:
+                        break
+
+        return final_starters, last_formation
+
     def _fallback_key_players(self, all_members: list, competitor_id: int) -> List[Dict[str, Any]]:
-        """Si la alineación no ha salido, extrae jugadores de la plantilla general."""
+        """Si la plantilla no tiene historial, extrae jugadores de la plantilla general."""
         players = []
         for m in all_members:
             if m.get("competitorId") == competitor_id:

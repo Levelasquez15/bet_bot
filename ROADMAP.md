@@ -80,20 +80,26 @@ Documento interno de seguimiento de arquitectura, módulos implementados y backl
 - [x] **Comando `/analizar [equipo]`** y botón táctil para análisis táctico bajo demanda.
 
 ### 🔹 Módulo 8: Asistente Personal de Apuestas (Córners & Props de Jugadores) (`src/assistant/`)
+- [x] **Enfoque Exclusivo Pre-Partido (Cero Partidos en Vivo):**
+  - El ayudante se enfoca estrictamente en partidos programados próximos a empezar, descartando partidos en juego.
+- [x] **Flujo Temporal Dual (Oficiales ~1h vs Horas Antes):**
+  - **🟢 Alineaciones Oficiales Confirmadas (~1 hora antes):** Detecta cuando los 11 titulares son confirmados oficialmente por la liga (~45 a 60 min antes del pitido inicial), analizando props directamente sobre los titulares verificados.
+  - **🟡 Pre-Partido Horas Antes (Once Habitual):** Para apuestas planificadas con horas de antelación, calcula el Once Habitual y probable a partir de los 11 jugadores más utilizados en los últimos 2-3 encuentros de cada equipo.
 - [x] **Asistente de Tiros de Esquina (`CornersAssistant`):**
-  - Análisis estadístico de los **últimos 10 partidos anteriores** de cada equipo (no solo H2H, sino contra sus rivales previos).
+  - Análisis estadístico de los **últimos 10 partidos anteriores** de cada equipo (contra rivales previos en sus ligas).
   - Cálculo de Córners a Favor (generados), Córners en Contra (concedidos) y Total acumulado por partido.
-  - Tasas de cumplimiento de líneas Over/Under (+8.5, +9.5, +10.5 córners) en la muestra histórica de 10 partidos.
-  - Proyección del partido y sugerencia de líneas seguras totales, líneas individuales y combinada de córners.
+  - Tasas de cumplimiento de líneas Over/Under (+8.5, +9.5, +10.5 córners) en la muestra de 10 partidos.
+  - Proyección del encuentro, líneas seguras recomendadas, líneas individuales y combinada de córners.
 - [x] **Asistente de Mercados de Jugadores (`PlayersAssistant`):**
-  - Detección del estado de alineación: 🟢 Confirmada (Oficial) vs 🟡 Probable / Proyectada.
-  - Extracción de los 11 titulares de ambos equipos y sus formaciones tácticas.
+  - Detección del estado de alineación y formaciones tácticas.
+  - Desglose de los 11 titulares (oficiales o habituales) de ambos equipos.
   - Selección de **Top Disparos a Puerta** (+0.5, +1.5 remates al arco) y **Top Disparos Totales** (+1.5, +2.5).
-  - Selección de **Top Faltas Cometidas** (pivotes defensivos/centrales) y **Faltas Recibidas** (atacantes/extremos).
-  - Sugerencia de combinada de props de jugador.
-- [x] **Operación Híbrida en Telegram & Background Worker:**
-  - Botonera táctil interactiva: `[🚩 Ayudante Córners]`, `[🎯 Disparos & Faltas]`, `[📋 Análisis Completo]`, `[🎰 Combinadas]`.
-  - Comandos directos: `/corners [equipo]`, `/jugadores [equipo]`, `/ayudante [equipo]`.
+  - Selección de **Top Faltas Cometidas** (pivotes defensivos/centrales) y **Faltas Recibidas** (extremos/delanteros desequilibrantes).
+  - Sugerencia de combinada especializada de props de jugador.
+- [x] **Operación Táctil en Telegram & Background Worker:**
+  - Botonera táctil con accesos directos: `[🚩 Córners (Historial 10P)]`, `[🎯 Disparos & Faltas]`, `[🟢 Oficiales Confirmadas (~1h)]`, `[🟡 Horas Antes (Once Habitual)]`, `[📋 Análisis Completo]`, `[🎰 Combinadas]`, `[⚽ Partidos y Alineaciones Hoy]`.
+  - Hub `Partidos y Alineaciones Hoy` 100% pre-partido con botones de filtrado y cuenta regresiva (`en 45m`, `en 3h`).
+  - Comandos directos: `/corners [equipo]`, `/jugadores [equipo]`, `/ayudante [equipo]`, `/partidos`.
   - Tarea en segundo plano (`lineup_monitor_job`): escaneo cada 2 min y envío automático de alerta a suscriptores cuando se confirma la alineación oficial de partidos top.
 
 ### 🔹 Módulo de Calidad: Modo Francotirador & Anti-Congelamiento

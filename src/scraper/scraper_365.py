@@ -386,10 +386,16 @@ class Scraper365:
             logger.error(f"Error consultando partido {game_id}: {e}")
         return {}
 
-    async def fetch_assistant_matches(self, hours_ahead: int = 24, min_tier: int = 2) -> List[Dict[str, Any]]:
+    async def fetch_assistant_matches(
+        self,
+        hours_ahead: int = 24,
+        min_tier: int = 2,
+        only_confirmed: bool = False
+    ) -> List[Dict[str, Any]]:
         """
-        Retorna partidos relevantes (Ligas Top y Sudamericanas) tanto en vivo
-        como programados en las próximas N horas para el asistente.
+        Retorna exclusivamente partidos PRÓXIMOS A EMPEZAR (Pre-partido) de Ligas Top
+        y Sudamericanas, con cálculo de tiempo restante y estado de alineación.
+        (Descarta terminantemente partidos en vivo).
         """
         games = await self._fetch_games(include_tomorrow=True)
         now = datetime.now(tz=BOGOTA_TZ)
@@ -403,23 +409,48 @@ class Scraper365:
             status_group = g.get("statusGroup")
             status_text = str(g.get("statusText", "")).strip().lower()
 
-            # En vivo
-            if status_group == STATUS_LIVE or status_text in ("primer tiempo", "segundo tiempo", "entretiempo", "mt"):
-                g["is_live"] = True
-                filtered.append(g)
+            # Descartar explícitamente en vivo o finalizados
+            if status_group in (STATUS_LIVE, STATUS_FINISHED):
+                continue
+            if any(kw in status_text for kw in ("tiempo", "entretiempo", "mt", "descanso", "fin", "finalizado", "suspendido", "cancelado")):
                 continue
 
-            # Próximos
-            if status_group in (STATUS_UPCOMING, STATUS_SCHEDULED) or status_text == "prog.":
+            # Solo partidos programados (Pre-partido)
+            if status_group in (STATUS_UPCOMING, STATUS_SCHEDULED) or status_text in ("prog.", "programado"):
                 start_str = g.get("startTime", "")
                 try:
                     start_dt = datetime.fromisoformat(start_str)
                     if now <= start_dt <= limit:
+                        mins_left = int((start_dt - now).total_seconds() / 60)
                         g["is_live"] = False
+                        g["start_dt"] = start_dt
+                        g["mins_left"] = mins_left
+
+                        # Formato legible de tiempo restante
+                        if mins_left <= 60:
+                            g["time_left_str"] = f"en {mins_left}m"
+                        elif mins_left <= 180:
+                            hrs = mins_left // 60
+                            rem_m = mins_left % 60
+                            g["time_left_str"] = f"en {hrs}h {rem_m}m"
+                        else:
+                            hrs = mins_left // 60
+                            g["time_left_str"] = f"en {hrs}h"
+
+                        # Detección de alineación: oficiales salen típicamente <= 70 min antes
+                        has_lineups_flag = bool(g.get("hasLineups") or g.get("lineupsStatus") == 3)
+                        is_confirmed = (mins_left <= 75 and has_lineups_flag)
+                        g["is_lineup_confirmed"] = is_confirmed
+
+                        if only_confirmed and not is_confirmed:
+                            continue
+
                         filtered.append(g)
                 except Exception:
                     continue
 
+        # Ordenar cronológicamente: los más próximos a empezar primero
+        filtered.sort(key=lambda x: x.get("start_dt", now))
         return filtered
 
     async def fetch_all_for_debug(self) -> dict:
