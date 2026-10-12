@@ -375,13 +375,16 @@ class Scraper365:
         return upcoming
 
     async def fetch_game_by_id(self, game_id: int) -> Dict[str, Any]:
-        """Consulta los detalles completos de un partido por su ID (incluye lineups y recentMatches)."""
+        """Consulta los detalles completos de un partido por su ID (incluye lineups, recentMatches y cuotas de casas)."""
         try:
-            url = f"https://webws.365scores.com/web/game/?gameId={game_id}&langId=29&appTypeId=5"
+            url = f"https://webws.365scores.com/web/game/?gameId={game_id}&langId=29&appTypeId=5&showOdds=true&userCountryId=170"
             resp = await self.session.get(url, timeout=15.0)
             if resp.status_code == 200:
                 data = resp.json()
-                return data.get("game", {})
+                g = data.get("game", {})
+                if g:
+                    g["parsed_odds"] = extract_match_odds(g)
+                return g
         except Exception as e:
             logger.error(f"Error consultando partido {game_id}: {e}")
         return {}

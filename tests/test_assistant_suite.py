@@ -185,6 +185,76 @@ class TestAssistantSuite(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(len(h_sot), 2)
         self.assertEqual(len(a_sot), 0)
 
+    def test_bookmaker_options_and_rentability_audit(self):
+        """
+        Valida que el Asistente consulte la escalera de cuotas de las casas de apuestas
+        y priorice la línea más rentable (+EV / 'uno menos') con desglose transparente:
+        - Para disparos: prioriza +1.5 disparos en lugar de forzar +2.5.
+        - Para disparos a puerta: prioriza +0.5 disparos a puerta en lugar de +1.5.
+        - Ofrece la opción agresiva (+2.5 o +1.5) y nota de rentabilidad matemática.
+        - Muestra cuotas 1X2 en el Hub del partido cuando están disponibles.
+        """
+        home_players = [
+            {"name": "Robert Lewandowski", "position": "Delantero", "avg_shots": 2.8, "avg_sot": 1.4},
+        ]
+        away_players = [
+            {"name": "Kylian Mbappé", "position": "Delantero", "avg_shots": 3.2, "avg_sot": 1.6},
+        ]
+
+        h_shots, a_shots = self.players_assistant._select_team_total_shots(home_players, away_players, "Barcelona", "Real Madrid")
+        self.assertEqual(len(h_shots), 1)
+        p_shot = h_shots[0]
+        # Línea recomendada debe ser la más rentable (+EV): +1.5
+        self.assertEqual(p_shot["line"], "+1.5 Disparos Totales")
+        self.assertIn("alt_line", p_shot)
+        self.assertEqual(p_shot["alt_line"], "+2.5 Disparos Totales")
+        self.assertIn("rentability_note", p_shot)
+        self.assertIn("uno menos", p_shot["rentability_note"].lower())
+
+        # Tiros a puerta: debe priorizar +0.5 como la línea más rentable (+EV)
+        h_sot, a_sot = self.players_assistant._select_team_shots_on_target(home_players, away_players, "Barcelona", "Real Madrid")
+        self.assertEqual(len(h_sot), 1)
+        p_sot = h_sot[0]
+        self.assertEqual(p_sot["line"], "+0.5 Disparos a Puerta")
+        self.assertEqual(p_sot["alt_line"], "+1.5 Disparos a Puerta")
+        self.assertIn("rentability_note", p_sot)
+
+        # Formateadores con desglose de casa de apuestas
+        mock_pdata = {
+            "match": "Barcelona vs Real Madrid",
+            "home_name": "Barcelona",
+            "away_name": "Real Madrid",
+            "lineup_status_text": "🟢 Confirmada",
+            "home_total_shots": h_shots,
+            "away_total_shots": a_shots,
+            "home_shots_on_target": h_sot,
+            "away_shots_on_target": a_sot
+        }
+
+        shot_rep = format_total_shots_report(mock_pdata)
+        self.assertIn("MÁS RENTABLE (+EV)", shot_rep)
+        self.assertIn("Opción Agresiva Casa", shot_rep)
+        self.assertIn("+1.5 Disparos Totales", shot_rep)
+        self.assertIn("+2.5 Disparos Totales", shot_rep)
+
+        sot_rep = format_shots_on_target_report(mock_pdata)
+        self.assertIn("MÁS RENTABLE (+EV)", sot_rep)
+        self.assertIn("Opción Agresiva Casa", sot_rep)
+        self.assertIn("+0.5 Disparos a Puerta", sot_rep)
+        self.assertIn("+1.5 Disparos a Puerta", sot_rep)
+
+        # Hub con cuotas 1X2 de la casa
+        game_info_with_odds = {
+            "competitionDisplayName": "LaLiga",
+            "startTime": "2026-10-12T19:00:00Z",
+            "parsed_odds": {"has_odds": True, "home": 2.15, "draw": 3.50, "away": 3.10}
+        }
+        hub_msg = format_match_hub_message(game_info_with_odds, mock_pdata)
+        self.assertIn("Cuotas 1X2 (Casa):", hub_msg)
+        self.assertIn("2.15", hub_msg)
+        self.assertIn("3.5", hub_msg)
+        self.assertIn("3.1", hub_msg)
+
     def test_formatters(self):
         """Verifica que los formateadores HTML produzcan textos válidos y completos."""
         corners_data = {

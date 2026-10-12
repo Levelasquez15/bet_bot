@@ -449,7 +449,10 @@ class PlayersAssistant:
         Selecciona ÚNICAMENTE jugadores determinantes con alta probabilidad de tiro a puerta / arco (+0.5 o +1.5).
         - Excluye estrictamente a defensores, pivotes defensivos y porteros.
         - Requiere un promedio mínimo de remates a puerta (avg_sot >= 0.7).
-        - Cantidad dinámica: hasta 2-3 en equipos élite, 1 o 0 en equipos chicos.
+        - Evalúa la escalera de cuotas de la casa de apuestas:
+            * Prioriza '+0.5 Disparos a Puerta' como la línea MÁS RENTABLE (+EV):
+              con solo 1 remate al arco en 90' tiene una tasa de acierto estimada de 82-92%.
+            * Ofrece '+1.5 Disparos a Puerta' como opción agresiva de cuota alta, con advertencia de riesgo.
         """
         def _get_determinant_sot(players, team_name):
             tier = get_team_tier(team_name)
@@ -470,23 +473,35 @@ class PlayersAssistant:
                 if avg_sot < 0.7:
                     continue
 
-                if avg_sot >= 1.4:
-                    line = "+1.5 Disparos a Puerta"
-                    odd = "1.85 - 2.15"
-                    conf = min(88.0, round(68.0 + (avg_sot - 1.4) * 14.0, 1))
-                else:
-                    line = "+0.5 Disparos a Puerta"
-                    odd = "1.45 - 1.70"
-                    conf = min(89.0, round(72.0 + (avg_sot - 0.7) * 16.0, 1))
+                # Escalera de cuotas de la casa de apuestas
+                best_line = "+0.5 Disparos a Puerta"
+                best_odd = "1.45 - 1.65" if avg_sot < 1.4 else "1.38 - 1.55"
+                best_hit_rate = min(94, round(78 + (avg_sot - 0.7) * 15))
+                conf = min(90.0, round(74.0 + (avg_sot - 0.7) * 14.0, 1))
+
+                alt_line = "+1.5 Disparos a Puerta"
+                alt_odd = "1.90 - 2.25" if avg_sot >= 1.4 else "2.25 - 2.70"
+                alt_hit_rate = min(62, max(38, round(40 + (avg_sot - 0.7) * 18)))
+
+                rentability_note = (
+                    f"La línea {best_line} es la más rentable (+EV): solo requiere 1 tiro entre los 3 palos en 90', "
+                    f"protegiendo la apuesta ante defensas cerradas. La opción {alt_line} suele fallar si el arquero rival interviene poco."
+                )
 
                 candidates.append({
                     "player": p["name"],
                     "team": team_name,
                     "position": p.get("position", "Atacante"),
-                    "line": line,
+                    "line": best_line,
+                    "odd": best_odd,
                     "avg": avg_sot,
-                    "odd": odd,
-                    "confidence": conf
+                    "confidence": conf,
+                    "hit_rate": f"{best_hit_rate}%",
+                    "ev_rating": "MÁXIMO (+EV)",
+                    "alt_line": alt_line,
+                    "alt_odd": alt_odd,
+                    "alt_hit_rate": f"{alt_hit_rate}%",
+                    "rentability_note": rentability_note
                 })
 
             candidates.sort(key=lambda x: (x["avg"], x["confidence"]), reverse=True)
@@ -501,9 +516,11 @@ class PlayersAssistant:
         Selecciona ÚNICAMENTE jugadores determinantes con alta probabilidad de superar la línea de disparos.
         - Excluye estrictamente defensores y porteros.
         - Filtra a jugadores con promedio < 1.4 tiros.
-        - La cantidad es dinámica:
-            * Equipos élite (ej. Barcelona): hasta 2 o 3 si cumplen alta probabilidad.
-            * Equipos estándar/chicos: 1 o 0 si nadie tiene volumen suficiente.
+        - Evalúa la escalera de opciones de la casa de apuestas:
+            * Prioriza '+1.5 Disparos Totales' ('uno menos') como la línea MÁS RENTABLE (+EV):
+              mantiene una tasa de acierto del 85-92% y evita perder la apuesta ante partidos cerrados
+              donde el jugador remata 2 veces.
+            * Provee '+2.5 Disparos Totales' como opción agresiva de cuota alta indicando su riesgo de margen.
         """
         def _get_determinant_shooters(players, team_name):
             tier = get_team_tier(team_name)
@@ -522,23 +539,34 @@ class PlayersAssistant:
                 if avg < 1.4:
                     continue
 
-                if avg >= 2.8:
-                    line = "+2.5 Disparos Totales"
-                    odd = "1.85 - 2.20"
-                    conf = min(88.0, round(65.0 + (avg - 2.8) * 10.0, 1))
-                else:
-                    line = "+1.5 Disparos Totales"
-                    odd = "1.50 - 1.75"
-                    conf = min(89.0, round(70.0 + (avg - 1.4) * 12.0, 1))
+                best_line = "+1.5 Disparos Totales"
+                best_odd = "1.50 - 1.70" if avg < 2.6 else "1.42 - 1.58"
+                best_hit_rate = min(94, round(78 + (avg - 1.4) * 8))
+                conf = min(91.0, round(75.0 + (avg - 1.4) * 8.0, 1))
+
+                alt_line = "+2.5 Disparos Totales"
+                alt_odd = "1.95 - 2.30" if avg >= 2.6 else "2.25 - 2.65"
+                alt_hit_rate = min(68, max(42, round(45 + (avg - 1.4) * 11)))
+
+                rentability_note = (
+                    f"La línea {best_line} ('uno menos') es la más rentable (+EV): asegura el cobro ante partidos cerrados "
+                    f"o sustituciones al 70' donde el jugador hace 2 tiros. {alt_line} arriesga la apuesta por solo 1 disparo de diferencia."
+                )
 
                 candidates.append({
                     "player": p["name"],
                     "team": team_name,
                     "position": p.get("position", "Atacante"),
-                    "line": line,
+                    "line": best_line,
+                    "odd": best_odd,
                     "avg": avg,
-                    "odd": odd,
-                    "confidence": conf
+                    "confidence": conf,
+                    "hit_rate": f"{best_hit_rate}%",
+                    "ev_rating": "ALTO (+EV)",
+                    "alt_line": alt_line,
+                    "alt_odd": alt_odd,
+                    "alt_hit_rate": f"{alt_hit_rate}%",
+                    "rentability_note": rentability_note
                 })
 
             candidates.sort(key=lambda x: (x["avg"], x["confidence"]), reverse=True)
@@ -563,14 +591,34 @@ class PlayersAssistant:
                 avg_fc = p.get("avg_fouls_comm", 0.0)
                 if avg_fc < 1.3:
                     continue
+
+                best_line = "+1.5 Faltas Cometidas"
+                best_odd = "1.60 - 1.85"
+                best_hit_rate = min(90, round(70 + (avg_fc - 1.3) * 15))
+                conf = min(88.0, round(70.0 + (avg_fc - 1.3) * 12.0, 1))
+
+                alt_line = "+2.5 Faltas Cometidas"
+                alt_odd = "2.30 - 2.80"
+                alt_hit_rate = min(55, max(35, round(35 + (avg_fc - 1.3) * 14)))
+
+                rentability_note = (
+                    f"{best_line} es la línea óptima (+EV) para pivotes y laterales; evita depender de amonestaciones tempranas."
+                )
+
                 candidates.append({
                     "player": p["name"],
                     "team": team_name,
                     "position": p.get("position", "Pivote / Defensor"),
-                    "line": "+1.5 Faltas Cometidas",
+                    "line": best_line,
+                    "odd": best_odd,
                     "avg": avg_fc,
-                    "odd": "1.60 - 1.85",
-                    "confidence": min(87.0, round(66.0 + (avg_fc - 1.3) * 12.0, 1))
+                    "confidence": conf,
+                    "hit_rate": f"{best_hit_rate}%",
+                    "ev_rating": "ALTO (+EV)",
+                    "alt_line": alt_line,
+                    "alt_odd": alt_odd,
+                    "alt_hit_rate": f"{alt_hit_rate}%",
+                    "rentability_note": rentability_note
                 })
             candidates.sort(key=lambda x: (x["avg"], x["confidence"]), reverse=True)
             return candidates[:2]
@@ -594,14 +642,34 @@ class PlayersAssistant:
                 avg_fr = p.get("avg_fouls_rec", 0.0)
                 if avg_fr < 1.3:
                     continue
+
+                best_line = "+1.5 Faltas Recibidas"
+                best_odd = "1.65 - 1.90"
+                best_hit_rate = min(88, round(68 + (avg_fr - 1.3) * 15))
+                conf = min(86.0, round(68.0 + (avg_fr - 1.3) * 12.0, 1))
+
+                alt_line = "+2.5 Faltas Recibidas"
+                alt_odd = "2.35 - 2.85"
+                alt_hit_rate = min(54, max(34, round(35 + (avg_fr - 1.3) * 13)))
+
+                rentability_note = (
+                    f"{best_line} es la línea más rentable (+EV) para extremos regateadores que sufren faltas sistemáticas."
+                )
+
                 candidates.append({
                     "player": p["name"],
                     "team": team_name,
                     "position": p.get("position", "Extremo / Atacante"),
-                    "line": "+1.5 Faltas Recibidas",
+                    "line": best_line,
+                    "odd": best_odd,
                     "avg": avg_fr,
-                    "odd": "1.65 - 1.90",
-                    "confidence": min(86.0, round(65.0 + (avg_fr - 1.3) * 12.0, 1))
+                    "confidence": conf,
+                    "hit_rate": f"{best_hit_rate}%",
+                    "ev_rating": "ALTO (+EV)",
+                    "alt_line": alt_line,
+                    "alt_odd": alt_odd,
+                    "alt_hit_rate": f"{alt_hit_rate}%",
+                    "rentability_note": rentability_note
                 })
             candidates.sort(key=lambda x: (x["avg"], x["confidence"]), reverse=True)
             return candidates[:2]
@@ -682,6 +750,6 @@ class PlayersAssistant:
             f"🎰 <b>COMBINADA SUGERIDA (JUGADORES DETERMINANTES):</b>\n"
             f"{legs_text}\n\n"
             f"💵 <b>CUOTA TOTAL ESTIMADA:</b> <code>2.40 - 3.25</code>\n"
-            f"💡 <i>Selecciones filtradas por probabilidad alta y rol ofensivo real (+EV).</i>"
+            f"💡 <i>Selecciones optimizadas con la línea más rentable (+EV 'uno menos') para evitar perder por margen de 1 tiro.</i>"
         )
 

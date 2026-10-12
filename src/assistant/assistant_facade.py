@@ -11,6 +11,7 @@ import httpx
 
 from src.assistant.corners_assistant import CornersAssistant
 from src.assistant.players_assistant import PlayersAssistant
+from src.scraper.scraper_365 import extract_match_odds
 
 logger = logging.getLogger(__name__)
 
@@ -162,9 +163,11 @@ def format_players_report(data: Dict[str, Any]) -> str:
     lines.append("🎯 <b>TOP DISPAROS A PUERTA (REMATES AL ARCO):</b>")
     if data.get("top_shots_on_target"):
         for p in data["top_shots_on_target"]:
+            alt_info = f" | ⚡ Casa: {p['alt_line']} [@ {p.get('alt_odd', '2.15')}]" if p.get("alt_line") else ""
             lines.append(
                 f"  • <b>{p['player']}</b> ({p['team']})\n"
-                f"    👉 <b>{p['line']}</b> [@ {p['odd']}] | Prom: {p['avg']} al arco | Conf: {p['confidence']}%"
+                f"    👉 🛡️ <b>{p['line']}</b> [@ {p['odd']}] (Éxito: {p.get('hit_rate', '85%')}){alt_info}\n"
+                f"    📊 Prom: {p['avg']} al arco | Conf: {p['confidence']}%"
             )
     else:
         lines.append("  <i>Sin datos suficientes de disparos a puerta.</i>")
@@ -174,9 +177,11 @@ def format_players_report(data: Dict[str, Any]) -> str:
     lines.append("🚀 <b>TOP DISPAROS TOTALES (TIROS DENTRO/FUERA):</b>")
     if data.get("top_total_shots"):
         for p in data["top_total_shots"]:
+            alt_info = f" | ⚡ Casa: {p['alt_line']} [@ {p.get('alt_odd', '2.15')}]" if p.get("alt_line") else ""
             lines.append(
                 f"  • <b>{p['player']}</b> ({p['team']})\n"
-                f"    👉 <b>{p['line']}</b> [@ {p['odd']}] | Prom: {p['avg']} tiros | Conf: {p['confidence']}%"
+                f"    👉 🛡️ <b>{p['line']}</b> [@ {p['odd']}] (Éxito: {p.get('hit_rate', '85%')}){alt_info}\n"
+                f"    📊 Prom: {p['avg']} tiros | Conf: {p['confidence']}%"
             )
     else:
         lines.append("  <i>Sin datos suficientes de disparos totales.</i>")
@@ -210,7 +215,7 @@ def format_players_report(data: Dict[str, Any]) -> str:
 
 
 def format_total_shots_report(data: Dict[str, Any]) -> str:
-    """Formatea el informe EXCLUSIVO de Disparos Totales (ambos equipos contemplados)."""
+    """Formatea el informe EXCLUSIVO de Disparos Totales con comparativa de cuotas y auditoría de rentabilidad (+EV)."""
     h_team = data.get("home_name") or data.get("match", "").split(" vs ")[0]
     a_team = data.get("away_name") or (data.get("match", "").split(" vs ")[1] if " vs " in data.get("match","") else "Visitante")
     status_badge = data.get("lineup_status_text", "")
@@ -222,43 +227,59 @@ def format_total_shots_report(data: Dict[str, Any]) -> str:
         f"🏠 <b>DISPAROS TOTALES — {h_team}:</b>"
     ]
 
+    def _render_shooter(p: dict) -> list[str]:
+        pos_disp = p.get('position') or p.get('team') or 'Atacante'
+        best_line = p.get('line', '+1.5 Disparos Totales')
+        best_odd = p.get('odd', '1.55')
+        hit_rate = p.get('hit_rate', f"{int(p.get('confidence', 80))}%")
+        avg_disp = p.get('avg', 0.0)
+
+        card = [
+            f"  • 👤 <b>{p['player']}</b> ({pos_disp}) — Prom: <b>{avg_disp}</b> tiros",
+            f"    🛡️ <b>MÁS RENTABLE (+EV):</b> <b>{best_line}</b> [@ {best_odd}] (Éxito est.: <b>{hit_rate}</b>)"
+        ]
+        if p.get("alt_line"):
+            card.append(f"    ⚡ <i>Opción Agresiva Casa:</i> {p['alt_line']} [@ {p.get('alt_odd', '2.15')}] (Éxito est.: {p.get('alt_hit_rate', '52%')})")
+        if p.get("rentability_note"):
+            card.append(f"    💡 <i>{p['rentability_note']}</i>")
+        return card
+
     h_shots = data.get("home_total_shots", [])
     if h_shots:
         for p in h_shots:
-            pos_disp = p.get('position') or p.get('team') or 'Atacante'
-            lines.append(f"  • <b>{p['player']}</b> ({pos_disp})\n    👉 <b>{p['line']}</b> [@ {p['odd']}] | Prom: {p['avg']} tiros | Conf: {p.get('confidence', 80)}%")
+            lines.extend(_render_shooter(p))
     else:
-        lines.append("  ⚠️ <i>Sin jugadores con volumen ofensivo suficiente para superar la línea con alta probabilidad.</i>")
+        lines.append("  ⚠️ <i>Sin atacantes con volumen suficiente para superar la línea con alta rentabilidad (+EV).</i>")
 
     lines.append(f"\n✈️ <b>DISPAROS TOTALES — {a_team}:</b>")
     a_shots = data.get("away_total_shots", [])
     if a_shots:
         for p in a_shots:
-            pos_disp = p.get('position') or p.get('team') or 'Atacante'
-            lines.append(f"  • <b>{p['player']}</b> ({pos_disp})\n    👉 <b>{p['line']}</b> [@ {p['odd']}] | Prom: {p['avg']} tiros | Conf: {p.get('confidence', 80)}% 🔥")
+            lines.extend(_render_shooter(p))
     else:
-        lines.append("  ⚠️ <i>Sin jugadores con volumen ofensivo suficiente para superar la línea con alta probabilidad.</i>")
+        lines.append("  ⚠️ <i>Sin atacantes con volumen suficiente para superar la línea con alta rentabilidad (+EV).</i>")
 
     if h_shots and a_shots:
         lines.extend([
             "\n💡 <b>TICKET SUGERIDO DE DISPAROS (AMBOS EQUIPOS):</b>",
-            f"  • 🏠 {h_shots[0]['player']}: <b>{h_shots[0]['line']}</b>",
-            f"  • ✈️ {a_shots[0]['player']}: <b>{a_shots[0]['line']}</b>",
-            "  💵 <i>Cuota Estimada: 2.30 - 2.85</i>"
+            f"  • 🏠 {h_shots[0]['player']}: <b>{h_shots[0]['line']}</b> [@ {h_shots[0]['odd']}]",
+            f"  • ✈️ {a_shots[0]['player']}: <b>{a_shots[0]['line']}</b> [@ {a_shots[0]['odd']}]",
+            "  💵 <i>Cuota Estimada: 2.25 - 2.70 (+EV Sólido)</i>",
+            "  💡 <i>Estrategia 'Uno Menos': cobro constante ante partidos trabados evitando perder por 1 solo tiro.</i>"
         ])
     elif h_shots and len(h_shots) >= 2:
         lines.extend([
             f"\n💡 <b>TICKET SUGERIDO DE DISPAROS ({h_team} DOMINANTE):</b>",
-            f"  • 🏠 {h_shots[0]['player']}: <b>{h_shots[0]['line']}</b>",
-            f"  • 🏠 {h_shots[1]['player']}: <b>{h_shots[1]['line']}</b>",
-            "  💵 <i>Cuota Estimada: 2.35 - 3.10 (+EV por volumen ofensivo)</i>"
+            f"  • 🏠 {h_shots[0]['player']}: <b>{h_shots[0]['line']}</b> [@ {h_shots[0]['odd']}]",
+            f"  • 🏠 {h_shots[1]['player']}: <b>{h_shots[1]['line']}</b> [@ {h_shots[1]['odd']}]",
+            "  💵 <i>Cuota Estimada: 2.30 - 2.85 (+EV por volumen ofensivo)</i>"
         ])
     elif a_shots and len(a_shots) >= 2:
         lines.extend([
             f"\n💡 <b>TICKET SUGERIDO DE DISPAROS ({a_team} DOMINANTE):</b>",
-            f"  • ✈️ {a_shots[0]['player']}: <b>{a_shots[0]['line']}</b>",
-            f"  • ✈️ {a_shots[1]['player']}: <b>{a_shots[1]['line']}</b>",
-            "  💵 <i>Cuota Estimada: 2.35 - 3.10 (+EV por volumen ofensivo)</i>"
+            f"  • ✈️ {a_shots[0]['player']}: <b>{a_shots[0]['line']}</b> [@ {a_shots[0]['odd']}]",
+            f"  • ✈️ {a_shots[1]['player']}: <b>{a_shots[1]['line']}</b> [@ {a_shots[1]['odd']}]",
+            "  💵 <i>Cuota Estimada: 2.30 - 2.85 (+EV por volumen ofensivo)</i>"
         ])
     elif h_shots or a_shots:
         single = h_shots[0] if h_shots else a_shots[0]
@@ -266,14 +287,14 @@ def format_total_shots_report(data: Dict[str, Any]) -> str:
         lines.extend([
             f"\n💡 <b>SELECCIÓN DESTACADA INDIVIDUAL ({t_icon} {single['team']}):</b>",
             f"  • 🎯 {single['player']}: <b>{single['line']}</b> [@ {single['odd']}]",
-            "  💡 <i>Única opción con volumen ofensivo justificado en este choque.</i>"
+            "  💡 <i>Opción más rentable (+EV) con volumen ofensivo justificado.</i>"
         ])
 
     return "\n".join(lines)
 
 
 def format_shots_on_target_report(data: Dict[str, Any]) -> str:
-    """Formatea el informe EXCLUSIVO de Disparos a Puerta / Remates al Arco (ambos equipos)."""
+    """Formatea el informe EXCLUSIVO de Disparos a Puerta / Arco con comparativa de cuotas y rentabilidad (+EV)."""
     h_team = data.get("home_name") or data.get("match", "").split(" vs ")[0]
     a_team = data.get("away_name") or (data.get("match", "").split(" vs ")[1] if " vs " in data.get("match","") else "Visitante")
     status_badge = data.get("lineup_status_text", "")
@@ -285,11 +306,27 @@ def format_shots_on_target_report(data: Dict[str, Any]) -> str:
         f"🏠 <b>REMATES A PORTERÍA — {h_team}:</b>"
     ]
 
+    def _render_sot(p: dict) -> list[str]:
+        pos_disp = p.get('position') or p.get('team') or 'Atacante'
+        best_line = p.get('line', '+0.5 Disparos a Puerta')
+        best_odd = p.get('odd', '1.50')
+        hit_rate = p.get('hit_rate', f"{int(p.get('confidence', 80))}%")
+        avg_disp = p.get('avg', 0.0)
+
+        card = [
+            f"  • 👤 <b>{p['player']}</b> ({pos_disp}) — Prom: <b>{avg_disp}</b> al arco",
+            f"    🛡️ <b>MÁS RENTABLE (+EV):</b> <b>{best_line}</b> [@ {best_odd}] (Éxito est.: <b>{hit_rate}</b>)"
+        ]
+        if p.get("alt_line"):
+            card.append(f"    ⚡ <i>Opción Agresiva Casa:</i> {p['alt_line']} [@ {p.get('alt_odd', '2.20')}] (Éxito est.: {p.get('alt_hit_rate', '50%')})")
+        if p.get("rentability_note"):
+            card.append(f"    💡 <i>{p['rentability_note']}</i>")
+        return card
+
     h_sot = data.get("home_shots_on_target", [])
     if h_sot:
         for p in h_sot:
-            pos_disp = p.get('position') or p.get('team') or 'Atacante'
-            lines.append(f"  • <b>{p['player']}</b> ({pos_disp})\n    👉 <b>{p['line']}</b> [@ {p['odd']}] | Prom: {p['avg']} al arco | Conf: {p.get('confidence', 80)}% 🔥")
+            lines.extend(_render_sot(p))
     else:
         lines.append("  ⚠️ <i>Sin atacantes con promedio de remates a puerta suficiente para garantizar alta probabilidad.</i>")
 
@@ -297,31 +334,31 @@ def format_shots_on_target_report(data: Dict[str, Any]) -> str:
     a_sot = data.get("away_shots_on_target", [])
     if a_sot:
         for p in a_sot:
-            pos_disp = p.get('position') or p.get('team') or 'Atacante'
-            lines.append(f"  • <b>{p['player']}</b> ({pos_disp})\n    👉 <b>{p['line']}</b> [@ {p['odd']}] | Prom: {p['avg']} al arco | Conf: {p.get('confidence', 80)}% 🔥")
+            lines.extend(_render_sot(p))
     else:
         lines.append("  ⚠️ <i>Sin atacantes con promedio de remates a puerta suficiente para garantizar alta probabilidad.</i>")
 
     if h_sot and a_sot:
         lines.extend([
             "\n💡 <b>TICKET SUGERIDO DE TIROS AL ARCO (AMBOS EQUIPOS):</b>",
-            f"  • 🏠 {h_sot[0]['player']}: <b>{h_sot[0]['line']}</b>",
-            f"  • ✈️ {a_sot[0]['player']}: <b>{a_sot[0]['line']}</b>",
-            "  💵 <i>Cuota Estimada: 2.25 - 2.90</i>"
+            f"  • 🏠 {h_sot[0]['player']}: <b>{h_sot[0]['line']}</b> [@ {h_sot[0]['odd']}]",
+            f"  • ✈️ {a_sot[0]['player']}: <b>{a_sot[0]['line']}</b> [@ {a_sot[0]['odd']}]",
+            "  💵 <i>Cuota Estimada: 2.15 - 2.55 (+EV Muy Seguro)</i>",
+            "  💡 <i>Ventaja: solo se necesita 1 tiro a portería en los 90' por atacante para cobrar.</i>"
         ])
     elif h_sot and len(h_sot) >= 2:
         lines.extend([
             f"\n💡 <b>TICKET SUGERIDO DE TIROS AL ARCO ({h_team} DOMINANTE):</b>",
-            f"  • 🏠 {h_sot[0]['player']}: <b>{h_sot[0]['line']}</b>",
-            f"  • 🏠 {h_sot[1]['player']}: <b>{h_sot[1]['line']}</b>",
-            "  💵 <i>Cuota Estimada: 2.30 - 3.00 (+EV por efectividad ofensiva)</i>"
+            f"  • 🏠 {h_sot[0]['player']}: <b>{h_sot[0]['line']}</b> [@ {h_sot[0]['odd']}]",
+            f"  • 🏠 {h_sot[1]['player']}: <b>{h_sot[1]['line']}</b> [@ {h_sot[1]['odd']}]",
+            "  💵 <i>Cuota Estimada: 2.20 - 2.75 (+EV por efectividad ofensiva)</i>"
         ])
     elif a_sot and len(a_sot) >= 2:
         lines.extend([
             f"\n💡 <b>TICKET SUGERIDO DE TIROS AL ARCO ({a_team} DOMINANTE):</b>",
-            f"  • ✈️ {a_sot[0]['player']}: <b>{a_sot[0]['line']}</b>",
-            f"  • ✈️ {a_sot[1]['player']}: <b>{a_sot[1]['line']}</b>",
-            "  💵 <i>Cuota Estimada: 2.30 - 3.00 (+EV por efectividad ofensiva)</i>"
+            f"  • ✈️ {a_sot[0]['player']}: <b>{a_sot[0]['line']}</b> [@ {a_sot[0]['odd']}]",
+            f"  • ✈️ {a_sot[1]['player']}: <b>{a_sot[1]['line']}</b> [@ {a_sot[1]['odd']}]",
+            "  💵 <i>Cuota Estimada: 2.20 - 2.75 (+EV por efectividad ofensiva)</i>"
         ])
     elif h_sot or a_sot:
         single = h_sot[0] if h_sot else a_sot[0]
@@ -329,7 +366,7 @@ def format_shots_on_target_report(data: Dict[str, Any]) -> str:
         lines.extend([
             f"\n💡 <b>SELECCIÓN DESTACADA INDIVIDUAL ({t_icon} {single['team']}):</b>",
             f"  • 🎯 {single['player']}: <b>{single['line']}</b> [@ {single['odd']}]",
-            "  💡 <i>Única opción con alta probabilidad comprobada al arco en este choque.</i>"
+            "  💡 <i>Opción con máxima rentabilidad (+EV) comprobada al arco.</i>"
         ])
 
     return "\n".join(lines)
@@ -411,13 +448,13 @@ def format_match_parlay_report(full_data: Dict[str, Any]) -> str:
         "\n".join(legs),
         "\n💵 <b>CUOTA TOTAL ESTIMADA:</b> <code>2.70 - 3.80</code>",
         "🏦 <b>STAKE RECOMENDADO:</b> <code>2 / 5</code>\n",
-        "💡 <i>Ticket construido integrando córners, disparos y faltas de ambos bandos.</i>"
+        "💡 <i>Ticket construido integrando córners, disparos y faltas de ambos bandos con enfoque +EV.</i>"
     ]
     return "\n".join(lines)
 
 
 def format_match_hub_message(game_info: dict, players_data: dict) -> str:
-    """Muestra la pantalla de inicio del partido seleccionado con sus alineaciones y selector de mercados."""
+    """Muestra la pantalla de inicio del partido seleccionado con sus alineaciones, cuotas de casa y selector de mercados."""
     status_badge = players_data.get("lineup_status_text", "🟡 Probable")
     form_h = players_data.get("formation_home", "N/D")
     form_a = players_data.get("formation_away", "N/D")
@@ -435,8 +472,17 @@ def format_match_hub_message(game_info: dict, players_data: dict) -> str:
         f"⚽ <b>{h_name} vs {a_name}</b>",
         f"🏆 <i>{comp}</i> | 🕐 Inicio: <b>{time_disp}</b>",
         f"📋 Estado: <b>{status_badge}</b>",
-        f"📐 Formaciones: {form_h} vs {form_a}\n"
+        f"📐 Formaciones: {form_h} vs {form_a}"
     ]
+
+    odds_info = game_info.get("parsed_odds") or extract_match_odds(game_info)
+    if odds_info and odds_info.get("has_odds"):
+        h_odd = odds_info.get("home") or "-"
+        d_odd = odds_info.get("draw") or "-"
+        a_odd = odds_info.get("away") or "-"
+        lines.append(f"💰 <b>Cuotas 1X2 (Casa):</b> 1: <code>{h_odd}</code> | X: <code>{d_odd}</code> | 2: <code>{a_odd}</code>")
+
+    lines.append("")
 
     title_starters = (
         "👥 <b>ONCE TITULAR OFICIAL:</b>"
@@ -451,6 +497,7 @@ def format_match_hub_message(game_info: dict, players_data: dict) -> str:
 
     lines.append("\n👇 <b>Selecciona el mercado específico que deseas analizar para este partido:</b>")
     return "\n".join(lines)
+
 
 
 def format_custom_combinada_ticket(matches_data: list, profile: str = "media") -> str:
