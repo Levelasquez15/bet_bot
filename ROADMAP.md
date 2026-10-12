@@ -16,6 +16,7 @@ Documento interno de seguimiento de arquitectura, módulos implementados y backl
 | **Módulo 6** | Despliegue Docker & Render 24/7 con Health Check | ✅ Completado | Producción Activa |
 | **Módulo 7** | Decision Graph Multi-Agente & Gemini Flash | ✅ Completado | Tests validados |
 | **Módulo 8** | Asistente Personal (Córners 10P + Props Jugadores) | ✅ Completado | Tests validados |
+| **Módulo 9** | Auditor Multimodal de Tickets & Grafo de Conocimiento (+EV) | ✅ Completado | Tests validados |
 | **Calidad** | Modo Francotirador (Sniper Mode & Anti-Congelamiento) | ✅ Completado | Tests validados |
 
 ---
@@ -101,6 +102,21 @@ Documento interno de seguimiento de arquitectura, módulos implementados y backl
   - Hub `Partidos y Alineaciones Hoy` 100% pre-partido con botones de filtrado y cuenta regresiva (`en 45m`, `en 3h`).
   - Comandos directos: `/corners [equipo]`, `/jugadores [equipo]`, `/ayudante [equipo]`, `/partidos`.
   - Tarea en segundo plano (`lineup_monitor_job`): escaneo cada 2 min y envío automático de alerta a suscriptores cuando se confirma la alineación oficial de partidos top.
+
+### 🔹 Módulo 9: Auditor Multimodal de Tickets & Grafo de Conocimiento (+EV) (`src/graph/`)
+- [x] **Auditoría de Tickets por Imagen (OCR & Gemini Vision):**
+  - Procesamiento multimodal de fotos y capturas de pantalla de boletos de apuestas (Bet365, Betsson, Rushbet, etc.).
+  - Extracción precisa de selecciones: partidos, jugadores, mercados, líneas apostadas, cuotas y resultado visible.
+  - Verificación línea por línea: qué selecciones se cumplieron (✅) y cuáles fallaron (❌) con explicación detallada.
+  - Identificación del margen de fallo (ej. atacante que hizo 2 disparos cuando se pedía +2.5).
+  - Sugerencia de línea alternativa más rentable (+EV 'uno menos') que habría cobrado con éxito.
+- [x] **Grafo de Conocimiento & Aprendizaje Continuo (`KnowledgeGraph`):**
+  - Red relacional con nodos de Jugadores, Mercados, Escaleras de Cuotas (Rungs) y Patrones de Error persistida en SQLite.
+  - Conexión de fallos con patrones específicos (ej. `error_pattern:short_margin_1_shot`).
+  - Generación automática de lecciones y reglas de ajuste para evitar repetir errores a futuro.
+  - Consulta de inteligencia de jugadores para advertir al usuario si un jugador suele fallar líneas agresivas.
+  - Comandos interactivos `/ticket` y `/grafo` (o `/aprendizajes`) con reporte ejecutivo del estado del grafo.
+  - Botonera táctil: `[📸 Auditar Ticket / Foto]` y `[🧠 Grafo de Aprendizajes]` integrados en el menú principal.
 
 ### 🔹 Módulo de Calidad: Modo Francotirador & Anti-Congelamiento
 - [x] **Modo Francotirador (Sniper Mode):** Umbral mínimo de confianza elevado al $78\%$, cero tolerancia a conflictos tácticos y filtro prioritario en Ligas Tier 1 y 2.

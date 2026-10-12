@@ -13,7 +13,10 @@ import os
 import json
 from datetime import datetime
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
-from telegram.ext import Application, CommandHandler, CallbackQueryHandler, ContextTypes
+from telegram.ext import (
+    Application, CommandHandler, CallbackQueryHandler,
+    MessageHandler, filters, ContextTypes
+)
 
 from src.bot.subscribers import (
     add_subscriber, get_subscribers, set_paused,
@@ -26,6 +29,8 @@ from src.analyzer.combinadas import generate_best_parlay, format_parlay_message
 from src.db.database import db
 from src.graph.decision_graph import DecisionGraph
 from src.graph.state import MatchState
+from src.graph.knowledge_graph import knowledge_graph
+from src.graph.ticket_vision import ticket_parser, format_ticket_audit_report
 
 from src.assistant import (
     BetAssistant,
@@ -69,6 +74,10 @@ def get_main_menu_keyboard() -> InlineKeyboardMarkup:
         [
             InlineKeyboardButton("🚩 Córners (Historial 10P)", callback_data="btn_ayudante_corners"),
             InlineKeyboardButton("🎯 Disparos & Faltas", callback_data="btn_ayudante_players"),
+        ],
+        [
+            InlineKeyboardButton("📸 Auditar Ticket / Foto", callback_data="btn_audit_ticket"),
+            InlineKeyboardButton("🧠 Grafo de Aprendizajes", callback_data="btn_view_kg"),
         ],
         [
             InlineKeyboardButton("🎰 Generador de Combinadas", callback_data="btn_combinada_ayudante"),
@@ -383,6 +392,93 @@ async def combinada_command(update: Update, context: ContextTypes.DEFAULT_TYPE) 
             await update.message.reply_text(err_msg, reply_markup=get_back_keyboard())
     finally:
         await scraper.close()
+
+
+async def ticket_photo_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """
+    Manejador multimodal para imágenes/capturas de tickets de apuestas enviadas por el usuario.
+    Extrae las selecciones, evalúa qué líneas se cumplieron y cuáles no, y actualiza el Grafo de Conocimiento.
+    """
+    if not update.message:
+        return
+
+    photo_file = None
+    if update.message.photo:
+        photo_file = await context.bot.get_file(update.message.photo[-1].file_id)
+    elif update.message.document and update.message.document.mime_type and update.message.document.mime_type.startswith("image/"):
+        photo_file = await context.bot.get_file(update.message.document.file_id)
+    else:
+        return
+
+    chat_id = update.effective_chat.id if update.effective_chat else 0
+    status_msg = await update.message.reply_html(
+        "🔍 <i>Foto de ticket recibida. Procesando con el Auditor Multimodal y verificando líneas...</i>"
+    )
+
+    try:
+        photo_bytes = bytes(await photo_file.download_as_bytearray())
+        caption = update.message.caption or ""
+
+        # Parsear imagen con Gemini Vision
+        ticket_data = await ticket_parser.parse_ticket_image(photo_bytes, caption=caption)
+
+        # Registrar en el Grafo de Conocimiento y obtener lecciones aprendidas
+        insights = knowledge_graph.record_ticket_outcome(ticket_data, chat_id=chat_id)
+
+        # Formatear reporte detallado
+        report = format_ticket_audit_report(ticket_data, insights)
+
+        kb = InlineKeyboardMarkup([
+            [InlineKeyboardButton("🧠 Ver Grafo de Conocimiento", callback_data="btn_view_kg")],
+            [InlineKeyboardButton("🔙 Menú Principal", callback_data="btn_main_menu")]
+        ])
+
+        await status_msg.edit_text(report, parse_mode="HTML", reply_markup=kb)
+
+    except Exception as e:
+        logger.error(f"Error procesando imagen del ticket: {e}", exc_info=True)
+        await status_msg.edit_text(
+            f"❌ <b>Error analizando el ticket:</b> {e}\n\n"
+            "<i>Asegúrate de que la captura sea legible o envía el texto con /ticket.</i>",
+            parse_mode="HTML",
+            reply_markup=get_back_keyboard()
+        )
+
+
+async def ticket_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Comando /ticket para guiar al usuario o auditar texto manual de un boleto."""
+    args = context.args
+    if args:
+        text = " ".join(args)
+        ticket_data = ticket_parser._heuristic_fallback(text)
+        chat_id = update.effective_chat.id if update.effective_chat else 0
+        insights = knowledge_graph.record_ticket_outcome(ticket_data, chat_id=chat_id)
+        report = format_ticket_audit_report(ticket_data, insights)
+        await update.message.reply_html(report, reply_markup=get_back_keyboard())
+    else:
+        await update.message.reply_html(
+            "📸 <b>AUDITOR DE TICKETS & COMBINADAS</b> 📸\n\n"
+            "Para auditar tu apuesta y enseñarle al bot:\n"
+            "1. <b>Envía directamente una foto o captura de pantalla</b> de tu boleto de apuestas (Bet365, Betsson, Rushbet, etc.).\n"
+            "2. El bot revisará qué líneas se cumplieron (✅) y cuáles no (❌).\n"
+            "3. Actualizará el <b>Grafo de Conocimiento</b> para aprender de los fallos y evitar repetirlos.\n\n"
+            "<i>También puedes escribir:</i>\n"
+            "<code>/ticket Lewandowski +2.5 tiros perdio, City +8.5 corners gano</code>",
+            reply_markup=get_back_keyboard()
+        )
+
+
+async def grafo_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Comando /grafo para consultar las lecciones y estado del Grafo de Conocimiento."""
+    report = knowledge_graph.format_graph_status_report()
+    kb = InlineKeyboardMarkup([
+        [InlineKeyboardButton("📸 Auditar Nuevo Ticket", callback_data="btn_audit_ticket")],
+        [InlineKeyboardButton("🔙 Menú Principal", callback_data="btn_main_menu")]
+    ])
+    if update.message:
+        await update.message.reply_html(report, reply_markup=kb)
+    elif update.callback_query:
+        await update.callback_query.edit_message_text(report, parse_mode="HTML", reply_markup=kb)
 
 
 async def jornada_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -1382,6 +1478,28 @@ async def button_callback_handler(update: Update, context: ContextTypes.DEFAULT_
         set_paused(chat_id, False if curr == 1 else True)
         await query.edit_message_reply_markup(reply_markup=get_prefs_keyboard(chat_id))
 
+    elif data == "btn_view_kg":
+        report = knowledge_graph.format_graph_status_report()
+        kb = InlineKeyboardMarkup([
+            [InlineKeyboardButton("📸 Auditar Nuevo Ticket", callback_data="btn_audit_ticket")],
+            [InlineKeyboardButton("🔙 Menú Principal", callback_data="btn_main_menu")]
+        ])
+        await query.edit_message_text(report, parse_mode="HTML", reply_markup=kb)
+
+    elif data == "btn_audit_ticket":
+        await query.edit_message_text(
+            "📸 <b>AUDITAR TICKET / FOTO DE APUESTA</b> 📸\n\n"
+            "Envía una imagen o captura de pantalla de tu boleto de apuestas en este chat.\n\n"
+            "El Auditor de BetBot evaluará:\n"
+            "• ✅ Qué líneas se cumplieron y cuáles no\n"
+            "• ❌ Margen de fallo exacto (ej. si faltó 1 solo tiro)\n"
+            "• 💡 Líneas alternativas más rentables (+EV)\n"
+            "• 🧠 Actualizará el <b>Grafo de Conocimiento</b> para aprender de los resultados.\n\n"
+            "<i>Envía la foto ahora o usa el comando /ticket.</i>",
+            parse_mode="HTML",
+            reply_markup=get_back_keyboard()
+        )
+
 
 # ── Constructor de la Aplicación ───────────────────────────────────────────────
 
@@ -1407,6 +1525,11 @@ def create_application() -> Application:
     app.add_handler(CommandHandler("ayudante",  ayudante_command))
     app.add_handler(CommandHandler("asistente", ayudante_command))
 
+    # Comandos del Grafo de Conocimiento y Auditoría de Tickets
+    app.add_handler(CommandHandler("ticket",       ticket_command))
+    app.add_handler(CommandHandler("grafo",        grafo_command))
+    app.add_handler(CommandHandler("aprendizajes", grafo_command))
+
     # Comandos de Rendimiento y Apuestas
     app.add_handler(CommandHandler("combinada", combinada_ayudante_command))
     app.add_handler(CommandHandler("parlay",    combinada_ayudante_command))
@@ -1421,8 +1544,12 @@ def create_application() -> Application:
     app.add_handler(CommandHandler("debug",     debug_command))
     app.add_handler(CommandHandler("debugodds", debugodds_command))
 
+    # Manejador de imágenes/fotos para auditoría de tickets (Multimodal)
+    app.add_handler(MessageHandler(filters.PHOTO | (filters.Document.IMAGE), ticket_photo_handler))
+
     # Manejador de botones táctiles
     app.add_handler(CallbackQueryHandler(button_callback_handler))
 
     return app
+
 

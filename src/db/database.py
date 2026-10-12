@@ -28,9 +28,11 @@ class DatabaseManager:
         self.database_url = os.getenv("DATABASE_URL")
         self._is_postgres = bool(self.database_url and self.database_url.startswith("postgres"))
         
-        # Asegurar directorio de datos si es SQLite
-        if not self._is_postgres:
-            os.makedirs(os.path.dirname(self.db_path), exist_ok=True)
+        # Asegurar directorio de datos si es SQLite y no en memoria
+        if not self._is_postgres and self.db_path != ":memory:":
+            db_dir = os.path.dirname(self.db_path)
+            if db_dir:
+                os.makedirs(db_dir, exist_ok=True)
             
         self.init_db()
 
@@ -141,13 +143,57 @@ class DatabaseManager:
             );
             """)
 
+            # 5. Tablas de Grafo de Conocimiento y Auditoría de Tickets
+            cursor.execute("""
+            CREATE TABLE IF NOT EXISTS knowledge_nodes (
+                id TEXT PRIMARY KEY,
+                node_type TEXT NOT NULL, -- PLAYER, TEAM, MARKET, RUNG, ERROR_PATTERN
+                name TEXT NOT NULL,
+                properties_json TEXT NOT NULL DEFAULT '{}',
+                updated_at TEXT NOT NULL
+            );
+            """)
+
+            cursor.execute("""
+            CREATE TABLE IF NOT EXISTS knowledge_edges (
+                id TEXT PRIMARY KEY,
+                source_id TEXT NOT NULL,
+                target_id TEXT NOT NULL,
+                relation TEXT NOT NULL, -- FAILS_ON, SUCCEEDS_ON, TRIGGERED_PATTERN, HAS_VALUE
+                weight REAL NOT NULL DEFAULT 1.0,
+                properties_json TEXT NOT NULL DEFAULT '{}',
+                updated_at TEXT NOT NULL
+            );
+            """)
+
+            cursor.execute("""
+            CREATE TABLE IF NOT EXISTS ticket_audits (
+                id TEXT PRIMARY KEY,
+                chat_id INTEGER,
+                bookmaker TEXT,
+                total_odd REAL,
+                legs_count INTEGER NOT NULL DEFAULT 0,
+                hits_count INTEGER NOT NULL DEFAULT 0,
+                misses_count INTEGER NOT NULL DEFAULT 0,
+                status TEXT NOT NULL DEFAULT 'PENDIENTE',
+                legs_json TEXT NOT NULL DEFAULT '[]',
+                insights_json TEXT NOT NULL DEFAULT '[]',
+                raw_summary TEXT,
+                created_at TEXT NOT NULL
+            );
+            """)
+
             # Índices de aceleración para consultas frecuentes
             cursor.execute("CREATE INDEX IF NOT EXISTS idx_picks_status ON picks(status);")
             cursor.execute("CREATE INDEX IF NOT EXISTS idx_picks_created_at ON picks(created_at);")
             cursor.execute("CREATE INDEX IF NOT EXISTS idx_picks_game_id ON picks(game_id);")
             cursor.execute("CREATE INDEX IF NOT EXISTS idx_subscribers_paused ON subscribers(is_paused);")
+            cursor.execute("CREATE INDEX IF NOT EXISTS idx_knodes_type ON knowledge_nodes(node_type);")
+            cursor.execute("CREATE INDEX IF NOT EXISTS idx_kedges_source ON knowledge_edges(source_id);")
+            cursor.execute("CREATE INDEX IF NOT EXISTS idx_kedges_target ON knowledge_edges(target_id);")
+            cursor.execute("CREATE INDEX IF NOT EXISTS idx_ticket_audits_chat ON ticket_audits(chat_id);")
 
-            logger.info("Base de datos inicializada correctamente con modo WAL e índices.")
+            logger.info("Base de datos inicializada correctamente con modo WAL, índices y tablas de Grafo de Conocimiento.")
 
 
 # Instancia singleton para toda la aplicación

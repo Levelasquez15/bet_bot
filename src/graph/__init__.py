@@ -13,6 +13,8 @@ from src.graph.specialists import (
 from src.graph.gatekeeper import Gatekeeper
 from src.graph.supervisor import LLMSupervisor
 from src.graph.decision_graph import DecisionGraph
+from src.graph.knowledge_graph import KnowledgeGraph, knowledge_graph
+from src.graph.ticket_vision import TicketVisionParser, ticket_parser, format_ticket_audit_report
 
 __all__ = [
     "MatchState",
@@ -25,4 +27,9 @@ __all__ = [
     "Gatekeeper",
     "LLMSupervisor",
     "DecisionGraph",
+    "KnowledgeGraph",
+    "knowledge_graph",
+    "TicketVisionParser",
+    "ticket_parser",
+    "format_ticket_audit_report",
 ]
