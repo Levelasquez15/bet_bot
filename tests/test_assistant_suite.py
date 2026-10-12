@@ -19,7 +19,7 @@ except Exception:
     pass
 
 from src.assistant.corners_assistant import CornersAssistant
-from src.assistant.players_assistant import PlayersAssistant
+from src.assistant.players_assistant import PlayersAssistant, get_team_tier
 from src.assistant.assistant_facade import (
     BetAssistant,
     format_corners_report,
@@ -150,6 +150,40 @@ class TestAssistantSuite(unittest.IsolatedAsyncioTestCase):
         self.assertGreater(len(result["top_shots_on_target"]), 0)
         self.assertGreater(len(result["top_total_shots"]), 0)
         self.assertGreater(len(result["top_fouls_committed"]), 0)
+
+    def test_team_tier_and_determinant_filtering(self):
+        """Valida que los equipos élite tengan mayor cupo y los defensores no se sugieran para tiros."""
+        self.assertEqual(get_team_tier("FC Barcelona"), "elite")
+        self.assertEqual(get_team_tier("Benfica B"), "low")
+        self.assertEqual(get_team_tier("Talleres de Córdoba"), "competitive")
+
+        # Mock de jugadores para probar el filtro de 'jugadores determinantes'
+        home_players = [
+            {"name": "Robert Lewandowski", "position": "Delantero", "avg_shots": 3.4, "avg_sot": 1.7},
+            {"name": "Lamine Yamal", "position": "Extremo", "avg_shots": 2.7, "avg_sot": 1.3},
+            {"name": "Pau Cubarsí", "position": "Defensor", "avg_shots": 0.4, "avg_sot": 0.1},
+        ]
+        away_players = [
+            {"name": "Duarte Soares", "position": "Defensor", "avg_shots": 0.3, "avg_sot": 0.0},
+            {"name": "Rafael Quintas", "position": "Mediocampista", "avg_shots": 0.6, "avg_sot": 0.1},
+        ]
+
+        h_shots, a_shots = self.players_assistant._select_team_total_shots(home_players, away_players, "FC Barcelona", "Felgueiras")
+
+        # Barcelona (elite) debe tener 2 atacantes determinantes
+        self.assertEqual(len(h_shots), 2)
+        h_names = [p["player"] for p in h_shots]
+        self.assertIn("Robert Lewandowski", h_names)
+        self.assertIn("Lamine Yamal", h_names)
+        self.assertNotIn("Pau Cubarsí", h_names)  # Defensor excluido
+
+        # Felgueiras no tiene jugadores que superen el umbral mínimo (>= 1.4 tiros) -> debe retornar []
+        self.assertEqual(len(a_shots), 0)
+
+        # Tiros a puerta: Cubarsí y defensores deben estar excluidos
+        h_sot, a_sot = self.players_assistant._select_team_shots_on_target(home_players, away_players, "FC Barcelona", "Felgueiras")
+        self.assertEqual(len(h_sot), 2)
+        self.assertEqual(len(a_sot), 0)
 
     def test_formatters(self):
         """Verifica que los formateadores HTML produzcan textos válidos y completos."""

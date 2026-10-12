@@ -9,10 +9,32 @@ formación táctica de ambos equipos, y calcula las mejores selecciones en:
 
 import asyncio
 import logging
+import re
 from typing import Dict, Any, List, Optional
 import httpx
 
 logger = logging.getLogger(__name__)
+
+ELITE_ATTACKING_CLUBS = {
+    "barcelona", "real madrid", "manchester city", "man city", "bayern munich", "bayern münchen",
+    "paris saint-germain", "psg", "arsenal", "liverpool", "inter", "inter milan",
+    "bayer leverkusen", "atletico madrid", "atlético madrid", "sporting", "sporting cp",
+    "porto", "chelsea", "tottenham", "juventus", "milan", "napoli",
+    "borussia dortmund", "dortmund", "aston villa", "monaco", "atalanta",
+    "flamengo", "palmeiras", "river plate", "boca juniors", "botafogo"
+}
+
+
+def get_team_tier(team_name: str) -> str:
+    """Clasifica el poderío ofensivo del equipo para proyectar volumen real de disparo."""
+    t = (team_name or "").lower().strip()
+    # Detectar equipos B / filiales o divisiones juveniles
+    if re.search(r'\b(b|ii|sub-\d+|u19|u20|u21|u23|juvenil|femenino|femenil)\b', t):
+        return "low"
+    for elite in ELITE_ATTACKING_CLUBS:
+        if elite in t:
+            return "elite"
+    return "competitive"
 
 
 class PlayersAssistant:
@@ -94,11 +116,11 @@ class PlayersAssistant:
         else:
             lineup_status_text = "🟡 Probable (Once habitual según partidos anteriores)"
 
-        # Enriquecer métricas de jugadores con datos históricos recientes
-        enriched_home = await self._enrich_players_stats(client, h_starters, h_recent_ids, home_id)
-        enriched_away = await self._enrich_players_stats(client, a_starters, a_recent_ids, away_id)
+        # Enriquecer métricas de jugadores con datos históricos recientes y perfil del club
+        enriched_home = await self._enrich_players_stats(client, h_starters, h_recent_ids, home_id, team_name=home_name)
+        enriched_away = await self._enrich_players_stats(client, a_starters, a_recent_ids, away_id, team_name=away_name)
 
-        # Seleccionar las mejores apuestas contemplando AMBOS equipos
+        # Seleccionar ÚNICAMENTE jugadores determinantes con alta probabilidad
         home_sot, away_sot = self._select_team_shots_on_target(enriched_home, enriched_away, home_name, away_name)
         home_shots, away_shots = self._select_team_total_shots(enriched_home, enriched_away, home_name, away_name)
         home_fc, away_fc = self._select_team_fouls_committed(enriched_home, enriched_away, home_name, away_name)
@@ -258,39 +280,25 @@ class PlayersAssistant:
         client: httpx.AsyncClient,
         players: List[Dict[str, Any]],
         recent_ids: List[int],
-        team_id: int
+        team_id: int,
+        team_name: str = "Equipo"
     ) -> List[Dict[str, Any]]:
         """
-        Calcula el promedio de disparos, disparos a puerta y faltas
-        de los jugadores a través de los partidos recientes del equipo.
+        Calcula métricas estadísticas individuales de los jugadores.
+        Si la liga no registra mapa de tiros individuales en 365scores (segunda división, etc.),
+        calibra proyecciones matemáticas inteligentes basadas en el Poderío Ofensivo del Club (Tier) y posición.
         """
+        tier = get_team_tier(team_name)
+
         if not recent_ids or not players:
-            # Asignar promedios estimados según posición
             for p in players:
                 pos = p.get("position", "").lower()
-                if "delantero" in pos or "atacante" in pos:
-                    p["avg_shots"] = 2.4
-                    p["avg_sot"] = 1.2
-                    p["avg_fouls_comm"] = 1.1
-                    p["avg_fouls_rec"] = 1.4
-                elif "mediocampista" in pos or "volante" in pos:
-                    p["avg_shots"] = 1.5
-                    p["avg_sot"] = 0.6
-                    p["avg_fouls_comm"] = 1.5
-                    p["avg_fouls_rec"] = 1.2
-                elif "defensor" in pos or "central" in pos or "lateral" in pos:
-                    p["avg_shots"] = 0.6
-                    p["avg_sot"] = 0.2
-                    p["avg_fouls_comm"] = 1.6
-                    p["avg_fouls_rec"] = 0.8
-                else:
-                    p["avg_shots"] = 0.0
-                    p["avg_sot"] = 0.0
-                    p["avg_fouls_comm"] = 0.1
-                    p["avg_fouls_rec"] = 0.2
+                ash, asot, afc, afr = self._get_role_baselines(tier, pos)
+                p["avg_shots"], p["avg_sot"], p["avg_fouls_comm"], p["avg_fouls_rec"] = ash, asot, afc, afr
+                p["sample_games"] = 0
             return players
 
-        # Consultar hasta 4 partidos recientes para medir rendimiento individual real
+        # Consultar hasta 4 partidos recientes
         tasks = [
             client.get(
                 f"https://webws.365scores.com/web/game/?gameId={gid}&langId=29&appTypeId=5",
@@ -317,23 +325,38 @@ class PlayersAssistant:
                     mid = m.get("id")
                     m_name = members_map.get(mid, m.get("name", "")).lower()
                     if m_name in player_history:
-                        s_map = {s.get("name"): s.get("value") for s in m.get("stats", [])}
-                        try:
-                            shots = int(float(s_map.get("Total Remates", 0)))
-                        except (ValueError, TypeError):
-                            shots = 0
-                        try:
-                            sot = int(float(s_map.get("Remates al arco", 0)))
-                        except (ValueError, TypeError):
-                            sot = 0
-                        try:
-                            fc = int(float(s_map.get("Faltas cometidas", 0)))
-                        except (ValueError, TypeError):
-                            fc = 0
-                        try:
-                            fr = int(float(s_map.get("Faltas recibidas", 0)))
-                        except (ValueError, TypeError):
-                            fr = 0
+                        s_list = m.get("stats", [])
+                        shots = 0.0
+                        sot = 0.0
+                        fc = 0.0
+                        fr = 0.0
+
+                        for s in s_list:
+                            stype = s.get("type")
+                            sname = s.get("name", "").lower()
+                            sval = s.get("value", 0)
+                            try:
+                                sval_num = float(str(sval).split("/")[0].split("(")[0].strip())
+                            except Exception:
+                                sval_num = 0.0
+
+                            # Total remates (type 3 o type 4+5)
+                            if stype == 3 or "total remates" in sname or "total shots" in sname:
+                                shots = max(shots, sval_num)
+                            elif stype in (4, 5):
+                                shots += sval_num
+
+                            # Remates al arco (type 4)
+                            if stype == 4 or "remates al arco" in sname or "shots on target" in sname or "disparos a puerta" in sname:
+                                sot = max(sot, sval_num)
+
+                            # Faltas cometidas (type 42)
+                            if stype == 42 or "faltas cometidas" in sname or "fouls committed" in sname:
+                                fc = max(fc, sval_num)
+
+                            # Faltas recibidas (type 37)
+                            if stype == 37 or "faltas recibidas" in sname or "fouls suffered" in sname:
+                                fr = max(fr, sval_num)
 
                         player_history[m_name]["shots"].append(shots)
                         player_history[m_name]["sot"].append(sot)
@@ -342,127 +365,248 @@ class PlayersAssistant:
             except Exception as e:
                 logger.debug(f"Error procesando historial de jugador: {e}")
 
+        # Verificar si la API registró efectivamente tiros para este equipo en estos partidos
+        total_shots_scraped = sum(sum(p_h["shots"]) for p_h in player_history.values())
+        has_detailed_shot_stats = total_shots_scraped > 0
+
         # Integrar datos históricos reales calculados
         for p in players:
             name_key = p["name"].lower()
             hist = player_history.get(name_key, {})
             pos = p.get("position", "").lower()
+            ash, asot, afc, afr = self._get_role_baselines(tier, pos)
 
-            if hist.get("shots"):
+            if has_detailed_shot_stats and hist.get("shots"):
                 p["avg_shots"] = round(sum(hist["shots"]) / len(hist["shots"]), 1)
                 p["avg_sot"] = round(sum(hist["sot"]) / len(hist["sot"]), 1)
-                p["avg_fouls_comm"] = round(sum(hist["fouls_c"]) / len(hist["fouls_c"]), 1)
-                p["avg_fouls_rec"] = round(sum(hist["fouls_r"]) / len(hist["fouls_r"]), 1)
+                p["avg_fouls_comm"] = round(sum(hist["fouls_c"]) / len(hist["fouls_c"]), 1) if hist.get("fouls_c") else afc
+                p["avg_fouls_rec"] = round(sum(hist["fouls_r"]) / len(hist["fouls_r"]), 1) if hist.get("fouls_r") else afr
                 p["sample_games"] = len(hist["shots"])
             else:
-                # Proyección de base por rol
-                if "delantero" in pos or "atacante" in pos:
-                    p["avg_shots"], p["avg_sot"], p["avg_fouls_comm"], p["avg_fouls_rec"] = 2.5, 1.3, 1.1, 1.5
-                elif "mediocampista" in pos or "volante" in pos:
-                    p["avg_shots"], p["avg_sot"], p["avg_fouls_comm"], p["avg_fouls_rec"] = 1.6, 0.7, 1.6, 1.2
-                elif "defensor" in pos or "central" in pos or "lateral" in pos:
-                    p["avg_shots"], p["avg_sot"], p["avg_fouls_comm"], p["avg_fouls_rec"] = 0.6, 0.2, 1.7, 0.9
-                else:
-                    p["avg_shots"], p["avg_sot"], p["avg_fouls_comm"], p["avg_fouls_rec"] = 0.0, 0.0, 0.1, 0.1
-                p["sample_games"] = 0
+                # Proyección matemática calibrada por Poderío del Club y Posición
+                p["avg_shots"] = ash
+                p["avg_sot"] = asot
+                p["avg_fouls_comm"] = round(sum(hist["fouls_c"]) / len(hist["fouls_c"]), 1) if hist.get("fouls_c") and sum(hist["fouls_c"]) > 0 else afc
+                p["avg_fouls_rec"] = round(sum(hist["fouls_r"]) / len(hist["fouls_r"]), 1) if hist.get("fouls_r") and sum(hist["fouls_r"]) > 0 else afr
+                p["sample_games"] = len(hist.get("shots", []))
 
         return players
+
+    def _get_role_baselines(self, tier: str, pos: str) -> tuple[float, float, float, float]:
+        """
+        Retorna (avg_shots, avg_sot, avg_fouls_comm, avg_fouls_rec)
+        calibrado según el nivel del equipo y la demarcación táctica.
+        """
+        pos = (pos or "").lower()
+        if "portero" in pos or "goalkeeper" in pos:
+            return 0.0, 0.0, 0.1, 0.2
+
+        if tier == "elite":
+            # Equipos ultra ofensivos (Barcelona, Real Madrid, City, PSG, Bayern, etc.)
+            if any(w in pos for w in ("delantero", "atacante", "striker", "forward")):
+                return 3.2, 1.6, 1.1, 1.7
+            if any(w in pos for w in ("extremo", "winger")):
+                return 2.7, 1.3, 1.0, 2.1
+            if any(w in pos for w in ("mediapunta", "ofensivo", "cam")):
+                return 2.1, 0.9, 1.3, 1.6
+            if any(w in pos for w in ("mediocampista", "volante", "centrocampista", "pivote")):
+                return 1.3, 0.4, 1.7, 1.2
+            if any(w in pos for w in ("lateral", "carrilero")):
+                return 0.7, 0.2, 1.4, 1.1
+            # Defensores centrales
+            return 0.4, 0.1, 1.8, 0.7
+
+        elif tier == "low":
+            # Equipos filiales o de ligas menores / underdogs defensivos
+            if any(w in pos for w in ("delantero", "atacante", "striker", "forward")):
+                return 1.6, 0.7, 1.4, 1.3
+            if any(w in pos for w in ("extremo", "winger")):
+                return 1.2, 0.4, 1.3, 1.4
+            if any(w in pos for w in ("mediapunta", "ofensivo")):
+                return 0.9, 0.3, 1.4, 1.1
+            if any(w in pos for w in ("mediocampista", "volante", "centrocampista", "pivote")):
+                return 0.6, 0.1, 1.8, 0.9
+            return 0.2, 0.0, 1.6, 0.5
+
+        else:
+            # Equipos competitivos estándar
+            if any(w in pos for w in ("delantero", "atacante", "striker", "forward")):
+                return 2.4, 1.1, 1.2, 1.5
+            if any(w in pos for w in ("extremo", "winger")):
+                return 1.9, 0.8, 1.2, 1.8
+            if any(w in pos for w in ("mediapunta", "ofensivo")):
+                return 1.4, 0.5, 1.3, 1.4
+            if any(w in pos for w in ("mediocampista", "volante", "centrocampista", "pivote")):
+                return 0.9, 0.3, 1.7, 1.1
+            if any(w in pos for w in ("lateral", "carrilero")):
+                return 0.5, 0.1, 1.4, 0.9
+            return 0.3, 0.1, 1.6, 0.6
 
     def _select_team_shots_on_target(
         self, h_players: list, a_players: list, home_name: str, away_name: str
     ) -> tuple[List[Dict[str, Any]], List[Dict[str, Any]]]:
-        """Selecciona las mejores opciones de tiros al arco para CADA equipo."""
-        def _get_top(players, team):
-            out = []
-            cand = [p for p in players if "portero" not in p.get("position", "").lower()]
-            cand.sort(key=lambda x: x.get("avg_sot", 0), reverse=True)
-            for p in cand[:2]:
-                avg = p.get("avg_sot", 0)
-                line = "+0.5 Disparos a Puerta" if avg < 1.8 else "+1.5 Disparos a Puerta"
-                odd = "1.50 - 1.70" if line == "+0.5 Disparos a Puerta" else "1.85 - 2.15"
-                out.append({
+        """
+        Selecciona ÚNICAMENTE jugadores determinantes con alta probabilidad de tiro a puerta / arco (+0.5 o +1.5).
+        - Excluye estrictamente a defensores, pivotes defensivos y porteros.
+        - Requiere un promedio mínimo de remates a puerta (avg_sot >= 0.7).
+        - Cantidad dinámica: hasta 2-3 en equipos élite, 1 o 0 en equipos chicos.
+        """
+        def _get_determinant_sot(players, team_name):
+            tier = get_team_tier(team_name)
+            max_picks = 3 if tier == "elite" else (2 if tier == "competitive" else 1)
+
+            candidates = []
+            for p in players:
+                pos = p.get("position", "").lower()
+                # Excluir porteros y defensores
+                if any(w in pos for w in ("portero", "goalkeeper", "defensor", "central", "lateral", "defender")):
+                    continue
+                # Excluir mediocentros defensivos puros
+                if any(w in pos for w in ("pivote", "defensivo", "contención", "corte")):
+                    continue
+
+                avg_sot = p.get("avg_sot", 0.0)
+                # Umbral mínimo para remates a portería
+                if avg_sot < 0.7:
+                    continue
+
+                if avg_sot >= 1.4:
+                    line = "+1.5 Disparos a Puerta"
+                    odd = "1.85 - 2.15"
+                    conf = min(88.0, round(68.0 + (avg_sot - 1.4) * 14.0, 1))
+                else:
+                    line = "+0.5 Disparos a Puerta"
+                    odd = "1.45 - 1.70"
+                    conf = min(89.0, round(72.0 + (avg_sot - 0.7) * 16.0, 1))
+
+                candidates.append({
                     "player": p["name"],
-                    "team": team,
+                    "team": team_name,
                     "position": p.get("position", "Atacante"),
                     "line": line,
-                    "avg": avg,
+                    "avg": avg_sot,
                     "odd": odd,
-                    "confidence": min(88.0, round(60.0 + avg * 18.0, 1))
+                    "confidence": conf
                 })
-            return out
 
-        return _get_top(h_players, home_name), _get_top(a_players, away_name)
+            candidates.sort(key=lambda x: (x["avg"], x["confidence"]), reverse=True)
+            return candidates[:max_picks]
+
+        return _get_determinant_sot(h_players, home_name), _get_determinant_sot(a_players, away_name)
 
     def _select_team_total_shots(
         self, h_players: list, a_players: list, home_name: str, away_name: str
     ) -> tuple[List[Dict[str, Any]], List[Dict[str, Any]]]:
-        """Selecciona las mejores opciones de disparos totales para CADA equipo."""
-        def _get_top(players, team):
-            out = []
-            cand = [p for p in players if "portero" not in p.get("position", "").lower()]
-            cand.sort(key=lambda x: x.get("avg_shots", 0), reverse=True)
-            for p in cand[:2]:
-                avg = p.get("avg_shots", 0)
-                line = "+1.5 Disparos Totales" if avg < 2.8 else "+2.5 Disparos Totales"
-                odd = "1.55 - 1.75" if line == "+1.5 Disparos Totales" else "1.85 - 2.20"
-                out.append({
+        """
+        Selecciona ÚNICAMENTE jugadores determinantes con alta probabilidad de superar la línea de disparos.
+        - Excluye estrictamente defensores y porteros.
+        - Filtra a jugadores con promedio < 1.4 tiros.
+        - La cantidad es dinámica:
+            * Equipos élite (ej. Barcelona): hasta 2 o 3 si cumplen alta probabilidad.
+            * Equipos estándar/chicos: 1 o 0 si nadie tiene volumen suficiente.
+        """
+        def _get_determinant_shooters(players, team_name):
+            tier = get_team_tier(team_name)
+            max_picks = 3 if tier == "elite" else (2 if tier == "competitive" else 1)
+
+            candidates = []
+            for p in players:
+                pos = p.get("position", "").lower()
+                # Excluir porteros y defensores
+                if any(w in pos for w in ("portero", "goalkeeper", "defensor", "central", "lateral", "defender")):
+                    if p.get("avg_shots", 0) < 1.8:
+                        continue
+
+                avg = p.get("avg_shots", 0.0)
+                # Umbral mínimo estricto para considerarse "jugador determinante" en disparos
+                if avg < 1.4:
+                    continue
+
+                if avg >= 2.8:
+                    line = "+2.5 Disparos Totales"
+                    odd = "1.85 - 2.20"
+                    conf = min(88.0, round(65.0 + (avg - 2.8) * 10.0, 1))
+                else:
+                    line = "+1.5 Disparos Totales"
+                    odd = "1.50 - 1.75"
+                    conf = min(89.0, round(70.0 + (avg - 1.4) * 12.0, 1))
+
+                candidates.append({
                     "player": p["name"],
-                    "team": team,
+                    "team": team_name,
                     "position": p.get("position", "Atacante"),
                     "line": line,
                     "avg": avg,
                     "odd": odd,
-                    "confidence": min(89.0, round(58.0 + avg * 12.0, 1))
+                    "confidence": conf
                 })
-            return out
 
-        return _get_top(h_players, home_name), _get_top(a_players, away_name)
+            candidates.sort(key=lambda x: (x["avg"], x["confidence"]), reverse=True)
+            return candidates[:max_picks]
+
+        return _get_determinant_shooters(h_players, home_name), _get_determinant_shooters(a_players, away_name)
 
     def _select_team_fouls_committed(
         self, h_players: list, a_players: list, home_name: str, away_name: str
     ) -> tuple[List[Dict[str, Any]], List[Dict[str, Any]]]:
-        """Selecciona las mejores opciones de faltas cometidas para CADA equipo."""
-        def _get_top(players, team):
-            out = []
-            cand = [p for p in players if "portero" not in p.get("position", "").lower()]
-            cand.sort(key=lambda x: x.get("avg_fouls_comm", 0), reverse=True)
-            for p in cand[:2]:
-                avg = p.get("avg_fouls_comm", 0)
-                out.append({
+        """
+        Selecciona jugadores determinantes con alta probabilidad de cometer faltas (+1.5 Faltas).
+        - Dirigido a pivotes, mediocampistas de marca, defensores y laterales con corte intenso.
+        - Umbral mínimo: avg_fouls_comm >= 1.3 faltas por partido.
+        """
+        def _get_top_fouls(players, team_name):
+            candidates = []
+            for p in players:
+                pos = p.get("position", "").lower()
+                if "portero" in pos or "goalkeeper" in pos:
+                    continue
+                avg_fc = p.get("avg_fouls_comm", 0.0)
+                if avg_fc < 1.3:
+                    continue
+                candidates.append({
                     "player": p["name"],
-                    "team": team,
+                    "team": team_name,
                     "position": p.get("position", "Pivote / Defensor"),
                     "line": "+1.5 Faltas Cometidas",
-                    "avg": avg,
+                    "avg": avg_fc,
                     "odd": "1.60 - 1.85",
-                    "confidence": min(86.0, round(60.0 + avg * 14.0, 1))
+                    "confidence": min(87.0, round(66.0 + (avg_fc - 1.3) * 12.0, 1))
                 })
-            return out
+            candidates.sort(key=lambda x: (x["avg"], x["confidence"]), reverse=True)
+            return candidates[:2]
 
-        return _get_top(h_players, home_name), _get_top(a_players, away_name)
+        return _get_top_fouls(h_players, home_name), _get_top_fouls(a_players, away_name)
 
     def _select_team_fouls_received(
         self, h_players: list, a_players: list, home_name: str, away_name: str
     ) -> tuple[List[Dict[str, Any]], List[Dict[str, Any]]]:
-        """Selecciona las mejores opciones de faltas recibidas para CADA equipo."""
-        def _get_top(players, team):
-            out = []
-            cand = [p for p in players if "portero" not in p.get("position", "").lower()]
-            cand.sort(key=lambda x: x.get("avg_fouls_rec", 0), reverse=True)
-            for p in cand[:2]:
-                avg = p.get("avg_fouls_rec", 0)
-                out.append({
+        """
+        Selecciona jugadores determinantes que reciben faltas (+1.5 Faltas Recibidas).
+        - Dirigido a extremos desequilibrantes, regateadores y delanteros de choque.
+        - Umbral mínimo: avg_fouls_rec >= 1.3 faltas recibidas por partido.
+        """
+        def _get_fouled_players(players, team_name):
+            candidates = []
+            for p in players:
+                pos = p.get("position", "").lower()
+                if any(w in pos for w in ("portero", "defensor", "central")):
+                    continue
+                avg_fr = p.get("avg_fouls_rec", 0.0)
+                if avg_fr < 1.3:
+                    continue
+                candidates.append({
                     "player": p["name"],
-                    "team": team,
-                    "position": p.get("position", "Atacante / Extremo"),
+                    "team": team_name,
+                    "position": p.get("position", "Extremo / Atacante"),
                     "line": "+1.5 Faltas Recibidas",
-                    "avg": avg,
+                    "avg": avg_fr,
                     "odd": "1.65 - 1.90",
-                    "confidence": min(85.0, round(58.0 + avg * 14.0, 1))
+                    "confidence": min(86.0, round(65.0 + (avg_fr - 1.3) * 12.0, 1))
                 })
-            return out
+            candidates.sort(key=lambda x: (x["avg"], x["confidence"]), reverse=True)
+            return candidates[:2]
 
-        return _get_top(h_players, home_name), _get_top(a_players, away_name)
+        return _get_fouled_players(h_players, home_name), _get_fouled_players(a_players, away_name)
 
     def _select_top_shots_on_target(self, h_players: list, a_players: list, home_name: str, away_name: str) -> List[Dict[str, Any]]:
         h, a = self._select_team_shots_on_target(h_players, a_players, home_name, away_name)
@@ -494,39 +638,50 @@ class PlayersAssistant:
         h_shots: list, a_shots: list,
         h_fouls: list, a_fouls: list
     ) -> str:
-        """Arma una combinada de props de jugador contemplando rigurosamente AMBOS equipos."""
+        """Arma una combinada de props de jugador con jugadores determinantes de alta probabilidad."""
         legs = []
-        # Pierna 1: del equipo Local
+        # Pierna 1: del equipo Local (si tiene jugador determinante)
         if h_sot:
             p = h_sot[0]
-            legs.append(f"  1️⃣ 🏠 <b>{p['player']}</b> ({p['team']}): {p['line']} (Prom: {p['avg']})")
+            legs.append(f"  1️⃣ 🏠 <b>{p['player']}</b> ({p['team']}): <b>{p['line']}</b> [@ {p['odd']}]")
         elif h_shots:
             p = h_shots[0]
-            legs.append(f"  1️⃣ 🏠 <b>{p['player']}</b> ({p['team']}): {p['line']} (Prom: {p['avg']})")
+            legs.append(f"  1️⃣ 🏠 <b>{p['player']}</b> ({p['team']}): <b>{p['line']}</b> [@ {p['odd']}]")
 
-        # Pierna 2: del equipo Visitante
+        # Pierna 2: del equipo Visitante (si tiene jugador determinante)
         if a_sot:
             p = a_sot[0]
-            legs.append(f"  2️⃣ ✈️ <b>{p['player']}</b> ({p['team']}): {p['line']} (Prom: {p['avg']})")
+            legs.append(f"  2️⃣ ✈️ <b>{p['player']}</b> ({p['team']}): <b>{p['line']}</b> [@ {p['odd']}]")
         elif a_shots:
             p = a_shots[0]
-            legs.append(f"  2️⃣ ✈️ <b>{p['player']}</b> ({p['team']}): {p['line']} (Prom: {p['avg']})")
-        elif a_fouls:
-            p = a_fouls[0]
-            legs.append(f"  2️⃣ ✈️ <b>{p['player']}</b> ({p['team']}): {p['line']} (Prom: {p['avg']})")
+            legs.append(f"  2️⃣ ✈️ <b>{p['player']}</b> ({p['team']}): <b>{p['line']}</b> [@ {p['odd']}]")
 
-        # Pierna 3: faltas (cometidas o recibidas del equipo que corresponda)
-        if len(legs) < 3:
-            foul_cand = a_fouls[0] if (a_fouls and not any(p['team'] == a_fouls[0]['team'] for p in [h_sot[0]] if h_sot)) else (h_fouls[0] if h_fouls else None)
-            if foul_cand and foul_cand['player'] not in [x.split('<b>')[1].split('</b>')[0] for x in legs]:
-                legs.append(f"  3️⃣ 🟨 <b>{foul_cand['player']}</b> ({foul_cand['team']}): {foul_cand['line']} (Prom: {foul_cand['avg']})")
+        # Si uno de los equipos no tiene determinante en tiros pero el otro sí tiene un segundo determinante:
+        if len(legs) == 1:
+            if h_shots and len(h_shots) > 1:
+                p = h_shots[1]
+                legs.append(f"  2️⃣ 🏠 <b>{p['player']}</b> ({p['team']}): <b>{p['line']}</b> [@ {p['odd']}]")
+            elif a_shots and len(a_shots) > 1:
+                p = a_shots[1]
+                legs.append(f"  2️⃣ ✈️ <b>{p['player']}</b> ({p['team']}): <b>{p['line']}</b> [@ {p['odd']}]")
+
+        # Pierna 3: Faltas
+        all_fouls = a_fouls + h_fouls
+        existing_names = [l.split("<b>")[1].split("</b>")[0] for l in legs if "<b>" in l]
+        for f in all_fouls:
+            if f["player"] not in existing_names:
+                badge = "🏠" if any(f["team"] == p["team"] for p in (h_shots or h_sot or [])) else "✈️"
+                legs.append(f"  3️⃣ 🟨 <b>{f['player']}</b> ({f['team']}): <b>{f['line']}</b> [@ {f['odd']}]")
+                break
 
         if not legs:
-            return "No se encontraron suficientes selecciones de jugador para armar una combinada."
+            return "💡 <i>No se encontraron selecciones individuales que superen el umbral de alta probabilidad para este partido.</i>"
 
         legs_text = "\n".join(legs)
         return (
-            f"🎰 <b>Combinada de Props (Ambos Equipos Contemplados):</b>\n"
-            f"{legs_text}\n"
-            f"💵 <i>Cuota Estimada Combinada: 2.45 - 3.20</i>"
+            f"🎰 <b>COMBINADA SUGERIDA (JUGADORES DETERMINANTES):</b>\n"
+            f"{legs_text}\n\n"
+            f"💵 <b>CUOTA TOTAL ESTIMADA:</b> <code>2.40 - 3.25</code>\n"
+            f"💡 <i>Selecciones filtradas por probabilidad alta y rol ofensivo real (+EV).</i>"
         )
+
