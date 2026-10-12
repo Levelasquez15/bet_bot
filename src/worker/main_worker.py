@@ -209,9 +209,13 @@ async def lineup_monitor_job(context: ContextTypes.DEFAULT_TYPE) -> None:
 
 
 def setup_worker(app) -> None:
-    """Registra el worker principal, el monitor de alineaciones confirmadas y el verificador de resultados."""
-    app.job_queue.run_repeating(scraping_job, interval=120, first=15)
-    app.job_queue.run_repeating(lineup_monitor_job, interval=120, first=30)
+    """
+    Configura los procesos en segundo plano.
+    Las notificaciones automáticas no solicitadas (scraping_job y lineup_monitor_job)
+    han sido deshabilitadas a solicitud del usuario para operar 100% bajo demanda interactiva.
+    """
+    # Se deshabilitan los envíos masivos periódicos para no saturar al usuario con notificaciones.
+    # El bot responderá exclusivamente cuando el usuario consulte sus análisis y partidos.
     setup_result_checker(app)
-    logger.info("⚙️  Workers activos: Scraping (2min) + Lineup Monitor (2min) + Result Checker (10min).")
+    logger.info("⚙️ Worker activo en modo interactivo bajo demanda (sin alertas automáticas no solicitadas).")
 

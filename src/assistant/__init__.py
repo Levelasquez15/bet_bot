@@ -4,6 +4,12 @@ from src.assistant.assistant_facade import (
     BetAssistant,
     format_corners_report,
     format_players_report,
+    format_total_shots_report,
+    format_shots_on_target_report,
+    format_fouls_report,
+    format_match_parlay_report,
+    format_match_hub_message,
+    format_custom_combinada_ticket,
     format_full_match_report,
     format_lineup_alert
 )
@@ -14,6 +20,12 @@ __all__ = [
     "BetAssistant",
     "format_corners_report",
     "format_players_report",
+    "format_total_shots_report",
+    "format_shots_on_target_report",
+    "format_fouls_report",
+    "format_match_parlay_report",
+    "format_match_hub_message",
+    "format_custom_combinada_ticket",
     "format_full_match_report",
     "format_lineup_alert"
 ]

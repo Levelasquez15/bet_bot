@@ -24,14 +24,23 @@ from src.assistant.assistant_facade import (
     BetAssistant,
     format_corners_report,
     format_players_report,
+    format_total_shots_report,
+    format_shots_on_target_report,
+    format_fouls_report,
+    format_match_parlay_report,
+    format_match_hub_message,
+    format_custom_combinada_ticket,
     format_full_match_report,
     format_lineup_alert
 )
 from src.bot.telegram_client import (
     get_main_menu_keyboard,
     build_assistant_matches_keyboard,
-    get_assistant_navigation_keyboard
+    get_assistant_navigation_keyboard,
+    get_match_hub_keyboard,
+    get_combinadas_hub_keyboard
 )
+
 
 
 class TestAssistantSuite(unittest.IsolatedAsyncioTestCase):
@@ -177,6 +186,8 @@ class TestAssistantSuite(unittest.IsolatedAsyncioTestCase):
 
         players_data = {
             "match": "PSG vs Barcelona",
+            "home_name": "PSG",
+            "away_name": "Barcelona",
             "lineup_status_text": "🟢 Confirmada (Oficial)",
             "formation_home": "4-3-3",
             "formation_away": "4-3-3",
@@ -185,6 +196,27 @@ class TestAssistantSuite(unittest.IsolatedAsyncioTestCase):
             ],
             "top_total_shots": [
                 {"player": "Kylian Mbappé", "team": "PSG", "line": "+2.5 Disparos Totales", "odd": "1.80", "avg": 4.2, "confidence": 88.0}
+            ],
+            "home_shots_on_target": [
+                {"player": "Kylian Mbappé", "team": "PSG", "line": "+1.5 Disparos a Puerta", "odd": "1.90", "avg": 2.1, "confidence": 85.0}
+            ],
+            "away_shots_on_target": [
+                {"player": "Robert Lewandowski", "team": "Barcelona", "line": "+0.5 Disparos a Puerta", "odd": "1.45", "avg": 1.6, "confidence": 80.0}
+            ],
+            "home_total_shots": [
+                {"player": "Kylian Mbappé", "team": "PSG", "line": "+2.5 Disparos Totales", "odd": "1.80", "avg": 4.2, "confidence": 88.0}
+            ],
+            "away_total_shots": [
+                {"player": "Lamine Yamal", "team": "Barcelona", "line": "+1.5 Disparos Totales", "odd": "1.55", "avg": 2.6, "confidence": 82.0}
+            ],
+            "home_fouls_committed": [
+                {"player": "Manuel Ugarte", "team": "PSG", "position": "Pivote", "line": "+1.5 Faltas Cometidas", "odd": "1.75", "avg": 2.3}
+            ],
+            "away_fouls_committed": [
+                {"player": "Gavi", "team": "Barcelona", "position": "Pivote", "line": "+1.5 Faltas Cometidas", "odd": "1.65", "avg": 2.4}
+            ],
+            "home_fouls_received": [
+                {"player": "Ousmane Dembélé", "team": "PSG", "position": "Extremo", "line": "+1.5 Faltas Recibidas", "odd": "1.60", "avg": 2.1}
             ],
             "top_fouls_committed": [
                 {"player": "Gavi", "team": "Barcelona", "position": "Pivote", "line": "+1.5 Faltas Cometidas", "odd": "1.65", "avg": 2.4}
@@ -200,36 +232,92 @@ class TestAssistantSuite(unittest.IsolatedAsyncioTestCase):
         self.assertIn("AYUDANTE DE TIROS DE ESQUINA", report_corners)
         self.assertIn("PSG vs Barcelona", report_corners)
 
-        # 2. Reporte Jugadores
+        # 2. Reporte Jugadores General
         report_players = format_players_report(players_data)
         self.assertIn("AYUDANTE DE JUGADORES", report_players)
         self.assertIn("Kylian Mbappé", report_players)
-        self.assertIn("Gavi", report_players)
 
-        # 3. Reporte Completo
+        # 3. Reporte Disparos Totales
+        report_shots = format_total_shots_report(players_data)
+        self.assertIn("DISPAROS TOTALES", report_shots)
+        self.assertIn("PSG", report_shots)
+        self.assertIn("Barcelona", report_shots)
+
+        # 4. Reporte Disparos a Puerta
+        report_sot = format_shots_on_target_report(players_data)
+        self.assertIn("DISPAROS A PUERTA", report_sot)
+        self.assertIn("PSG", report_sot)
+        self.assertIn("Barcelona", report_sot)
+
+        # 5. Reporte Faltas
+        report_fouls = format_fouls_report(players_data)
+        self.assertIn("MERCADO DE FALTAS", report_fouls)
+        self.assertIn("Manuel Ugarte", report_fouls)
+        self.assertIn("Gavi", report_fouls)
+
+        # 6. Reporte Completo
         full_match_data = {"match": "PSG vs Barcelona", "corners": corners_data, "players": players_data}
         report_full = format_full_match_report(full_match_data)
         self.assertIn("INFORME COMPLETO DEL AYUDANTE BETBOT", report_full)
 
-        # 4. Alerta de Alineación
+        # 7. Combinada de este partido
+        report_parlay = format_match_parlay_report(full_match_data)
+        self.assertIn("COMBINADA EXCLUSIVA DEL PARTIDO", report_parlay)
+
+        # 8. Hub del partido
+        game_info = {"competitionDisplayName": "Champions League", "startTime": "2026-10-12T14:00:00Z"}
+        report_hub = format_match_hub_message(game_info, players_data)
+        self.assertIn("PSG vs Barcelona", report_hub)
+        self.assertIn("Champions League", report_hub)
+
+        # 9. Combinada personalizada por cuota
+        ticket_mod = format_custom_combinada_ticket([full_match_data], profile="moderada")
+        self.assertIn("CUOTA MODERADA", ticket_mod)
+        ticket_alt = format_custom_combinada_ticket([full_match_data], profile="alta")
+        self.assertIn("CUOTA ALTA", ticket_alt)
+
+        # 10. Alerta de Alineación
         alert_msg = format_lineup_alert("PSG vs Barcelona", "Champions League", "14:00", players_data, corners_data)
         self.assertIn("ALINEACIÓN OFICIAL CONFIRMADA", alert_msg)
 
     async def test_assistant_keyboards(self):
-        """Valida que los teclados del menú principal y de navegación se construyan correctamente."""
+        """Valida que los teclados del menú principal, navegación y hubs se construyan correctamente."""
         main_kb = get_main_menu_keyboard()
         cb_data_list = [btn.callback_data for row in main_kb.inline_keyboard for btn in row]
+        self.assertIn("btn_partidos_hoy", cb_data_list)
         self.assertIn("btn_oficiales_1h", cb_data_list)
         self.assertIn("btn_horas_antes", cb_data_list)
-        self.assertIn("btn_partidos_hoy", cb_data_list)
         self.assertIn("btn_ayudante_corners", cb_data_list)
         self.assertIn("btn_ayudante_players", cb_data_list)
+        self.assertIn("btn_combinada_ayudante", cb_data_list)
 
+        # Match Hub Keyboard
+        hub_kb = get_match_hub_keyboard("9999")
+        hub_cbs = [btn.callback_data for row in hub_kb.inline_keyboard for btn in row]
+        self.assertIn("crn_9999", hub_cbs)
+        self.assertIn("shots_9999", hub_cbs)
+        self.assertIn("sot_9999", hub_cbs)
+        self.assertIn("fouls_9999", hub_cbs)
+        self.assertIn("ful_9999", hub_cbs)
+        self.assertIn("cmb_match_9999", hub_cbs)
+
+        # Navigation Keyboard
         nav_kb = get_assistant_navigation_keyboard("9999", "corners")
         nav_cbs = [btn.callback_data for row in nav_kb.inline_keyboard for btn in row]
-        self.assertIn("ply_9999", nav_cbs)
+        self.assertIn("shots_9999", nav_cbs)
+        self.assertIn("sot_9999", nav_cbs)
+        self.assertIn("fouls_9999", nav_cbs)
         self.assertIn("ful_9999", nav_cbs)
-        self.assertIn("btn_main_menu", nav_cbs)
+        self.assertIn("cmb_match_9999", nav_cbs)
+        self.assertIn("hub_9999", nav_cbs)
+
+        # Combinadas Hub Keyboard
+        cmb_kb = get_combinadas_hub_keyboard()
+        cmb_cbs = [btn.callback_data for row in cmb_kb.inline_keyboard for btn in row]
+        self.assertIn("cmb_prof_moderada", cmb_cbs)
+        self.assertIn("cmb_prof_media", cmb_cbs)
+        self.assertIn("cmb_prof_alta", cmb_cbs)
+        self.assertIn("cmb_choose_match", cmb_cbs)
 
         # Probar generación de teclados de partidos con mock
         mock_game = {
@@ -246,10 +334,11 @@ class TestAssistantSuite(unittest.IsolatedAsyncioTestCase):
             txt_oficial, kb_oficial = await build_assistant_matches_keyboard("oficiales")
             self.assertIn("ALINEACIONES OFICIALES", txt_oficial)
             oficial_cbs = [btn.callback_data for row in kb_oficial.inline_keyboard for btn in row]
-            self.assertIn("ply_1234", oficial_cbs)
+            self.assertIn("hub_1234", oficial_cbs)
 
             txt_horas, kb_horas = await build_assistant_matches_keyboard("horas_antes")
             self.assertIn("PRE-PARTIDO HORAS ANTES", txt_horas)
+
 
 
 if __name__ == "__main__":

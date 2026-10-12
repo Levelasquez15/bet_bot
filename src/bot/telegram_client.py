@@ -31,6 +31,12 @@ from src.assistant import (
     BetAssistant,
     format_corners_report,
     format_players_report,
+    format_total_shots_report,
+    format_shots_on_target_report,
+    format_fouls_report,
+    format_match_parlay_report,
+    format_match_hub_message,
+    format_custom_combinada_ticket,
     format_full_match_report
 )
 
@@ -54,19 +60,18 @@ def get_main_menu_keyboard() -> InlineKeyboardMarkup:
     """Genera la botonera táctil principal optimizada para el Ayudante Pre-Partido."""
     return InlineKeyboardMarkup([
         [
-            InlineKeyboardButton("🚩 Córners (Historial 10P)", callback_data="btn_ayudante_corners"),
-            InlineKeyboardButton("🎯 Disparos & Faltas", callback_data="btn_ayudante_players"),
+            InlineKeyboardButton("⚽ Ver Partidos de Hoy", callback_data="btn_partidos_hoy"),
         ],
         [
             InlineKeyboardButton("🟢 Oficiales Confirmadas (~1h)", callback_data="btn_oficiales_1h"),
             InlineKeyboardButton("🟡 Horas Antes (Once Habitual)", callback_data="btn_horas_antes"),
         ],
         [
-            InlineKeyboardButton("📋 Análisis Completo Partido", callback_data="btn_ayudante_full"),
-            InlineKeyboardButton("🎰 Combinadas Córners/Props", callback_data="btn_combinada_ayudante"),
+            InlineKeyboardButton("🚩 Córners (Historial 10P)", callback_data="btn_ayudante_corners"),
+            InlineKeyboardButton("🎯 Disparos & Faltas", callback_data="btn_ayudante_players"),
         ],
         [
-            InlineKeyboardButton("⚽ Partidos y Alineaciones Hoy", callback_data="btn_partidos_hoy"),
+            InlineKeyboardButton("🎰 Generador de Combinadas", callback_data="btn_combinada_ayudante"),
             InlineKeyboardButton("💼 Mi Bankroll & ROI", callback_data="btn_bankroll"),
         ],
         [
@@ -99,6 +104,75 @@ def get_back_keyboard() -> InlineKeyboardMarkup:
     """Botón sencillo para regresar al menú principal."""
     return InlineKeyboardMarkup([
         [InlineKeyboardButton("🔙 Volver al Menú Principal", callback_data="btn_main_menu")]
+    ])
+
+
+def get_match_hub_keyboard(gid: str) -> InlineKeyboardMarkup:
+    """Botonera del Hub de un partido específico con sus opciones de mercado."""
+    return InlineKeyboardMarkup([
+        [
+            InlineKeyboardButton("🚩 Córners (10 Partidos)", callback_data=f"crn_{gid}"),
+            InlineKeyboardButton("🚀 Disparos Totales", callback_data=f"shots_{gid}")
+        ],
+        [
+            InlineKeyboardButton("🎯 Disparos a Puerta", callback_data=f"sot_{gid}"),
+            InlineKeyboardButton("🟨 Faltas (Com/Rec)", callback_data=f"fouls_{gid}")
+        ],
+        [
+            InlineKeyboardButton("📋 Análisis Completo", callback_data=f"ful_{gid}"),
+            InlineKeyboardButton("🎰 Combinada de Este Partido", callback_data=f"cmb_match_{gid}")
+        ],
+        [
+            InlineKeyboardButton("⚽ Volver a Partidos", callback_data="btn_partidos_hoy"),
+            InlineKeyboardButton("🏠 Menú Principal", callback_data="btn_main_menu")
+        ]
+    ])
+
+
+def get_match_view_navigation_keyboard(gid: str, current_view: str) -> InlineKeyboardMarkup:
+    """Navegación contextual entre mercados dentro del mismo partido."""
+    row1 = []
+    if current_view != "corners":
+        row1.append(InlineKeyboardButton("🚩 Córners", callback_data=f"crn_{gid}"))
+    if current_view != "shots":
+        row1.append(InlineKeyboardButton("🚀 Disparos", callback_data=f"shots_{gid}"))
+    if current_view != "sot":
+        row1.append(InlineKeyboardButton("🎯 A Puerta", callback_data=f"sot_{gid}"))
+    if current_view != "fouls":
+        row1.append(InlineKeyboardButton("🟨 Faltas", callback_data=f"fouls_{gid}"))
+
+    row2 = []
+    if current_view != "full":
+        row2.append(InlineKeyboardButton("📋 Completo", callback_data=f"ful_{gid}"))
+    if current_view != "parlay":
+        row2.append(InlineKeyboardButton("🎰 Combinada Partido", callback_data=f"cmb_match_{gid}"))
+
+    return InlineKeyboardMarkup([
+        row1,
+        row2,
+        [
+            InlineKeyboardButton("⚽ Volver al Partido", callback_data=f"hub_{gid}"),
+            InlineKeyboardButton("🔙 Lista Partidos", callback_data="btn_partidos_hoy")
+        ]
+    ])
+
+
+def get_combinadas_hub_keyboard() -> InlineKeyboardMarkup:
+    """Botonera interactiva del Hub de Combinadas."""
+    return InlineKeyboardMarkup([
+        [
+            InlineKeyboardButton("🛡️ Cuota Moderada (~2.00)", callback_data="cmb_prof_moderada"),
+            InlineKeyboardButton("⚖️ Cuota Media (~3.00)", callback_data="cmb_prof_media")
+        ],
+        [
+            InlineKeyboardButton("🚀 Cuota Alta (4.50+)", callback_data="cmb_prof_alta")
+        ],
+        [
+            InlineKeyboardButton("⚽ Elegir Partido para Combinada", callback_data="cmb_choose_match")
+        ],
+        [
+            InlineKeyboardButton("🔙 Volver al Menú Principal", callback_data="btn_main_menu")
+        ]
     ])
 
 
@@ -312,45 +386,55 @@ async def combinada_command(update: Update, context: ContextTypes.DEFAULT_TYPE) 
 
 
 async def jornada_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    """Muestra el calendario de partidos pre-partido monitoreados para hoy con estado de alineación."""
+    """Muestra los partidos pre-partido clasificados en Confirmadas (~1h) y Once Habitual (Horas antes)."""
     scraper = Scraper365()
     try:
         games = await scraper.fetch_assistant_matches(hours_ahead=24, min_tier=2)
 
+        confirmed_games = [g for g in games if g.get("is_lineup_confirmed")]
+        upcoming_games = [g for g in games if not g.get("is_lineup_confirmed")]
+
         lines = [
-            "⚽ <b>PARTIDOS Y ALINEACIONES DE HOY (PRE-PARTIDO)</b> ⚽\n",
-            "Monitoreo exclusivo de ligas destacadas: Champions League, Premier, LaLiga, Serie A, Bundesliga, Ligue 1, Brasileirão, Libertadores.\n",
-            "🟢 <b>Alineaciones Oficiales (~1h antes):</b> Los 11 titulares confirmados al 100%.",
-            "🟡 <b>Horas Antes (Once Habitual):</b> Proyección anticipada con los titulares más repetidos en sus últimos partidos.\n"
+            "⚽ <b>PARTIDOS PROGRAMADOS PARA HOY (PRE-PARTIDO)</b> ⚽\n",
+            "Selecciona un partido de la lista para abrir sus alineaciones y mercados específicos:\n"
         ]
 
-        buttons = [
-            [
-                InlineKeyboardButton("🟢 Solo Confirmadas (~1h)", callback_data="btn_oficiales_1h"),
-                InlineKeyboardButton("🟡 Horas Antes (Once Habitual)", callback_data="btn_horas_antes")
-            ]
-        ]
+        buttons = []
 
-        if games:
-            lines.append("📋 <b>Próximos Partidos Programados:</b>")
-            for g in games[:8]:
+        if confirmed_games:
+            lines.append("🟢 <b>Alineaciones Oficiales Confirmadas (~1h antes):</b>")
+            for g in confirmed_games[:6]:
                 gid = str(g.get("id"))
                 h = g.get("homeCompetitor", {}).get("name", "")[:12]
                 a = g.get("awayCompetitor", {}).get("name", "")[:12]
-                comp = g.get("competitionDisplayName") or ""
-                comp_short = comp[:10]
                 st = g.get("startTime", "")[11:16] if g.get("startTime") else "Hoy"
                 time_left = g.get("time_left_str", "")
-                badge = "🟢" if g.get("is_lineup_confirmed") else "🟡"
                 time_disp = f"{st} · {time_left}" if time_left else st
-
-                lines.append(f"  • {badge} <b>{h} vs {a}</b> 🕐 {time_disp} <i>[{comp_short}]</i>")
-                buttons.append([InlineKeyboardButton(f"{badge} {h} vs {a} ({time_disp})", callback_data=f"ply_{gid}")])
-
-            lines.append("\n👉 <i>Toca un partido para consultar su alineación (oficial o habitual) y props de jugadores/córners.</i>")
+                comp_short = (g.get("competitionDisplayName") or "")[:10]
+                lines.append(f"  • 🟢 <b>{h} vs {a}</b> 🕐 {time_disp} <i>[{comp_short}]</i>")
+                buttons.append([InlineKeyboardButton(f"🟢 {h} vs {a} ({time_disp})", callback_data=f"hub_{gid}")])
+            lines.append("")
         else:
+            lines.append("🟢 <i>Sin partidos con alineación oficial confirmada ahora (salen ~45-60 min antes).</i>\n")
+
+        if upcoming_games:
+            lines.append("🟡 <b>Alineación Por Conocer / Once Habitual (Horas antes):</b>")
+            for g in upcoming_games[:8]:
+                gid = str(g.get("id"))
+                h = g.get("homeCompetitor", {}).get("name", "")[:12]
+                a = g.get("awayCompetitor", {}).get("name", "")[:12]
+                st = g.get("startTime", "")[11:16] if g.get("startTime") else "Hoy"
+                time_left = g.get("time_left_str", "")
+                time_disp = f"{st} · {time_left}" if time_left else st
+                comp_short = (g.get("competitionDisplayName") or "")[:10]
+                lines.append(f"  • 🟡 <b>{h} vs {a}</b> 🕐 {time_disp} <i>[{comp_short}]</i>")
+                buttons.append([InlineKeyboardButton(f"🟡 {h} vs {a} ({time_disp})", callback_data=f"hub_{gid}")])
+            lines.append("")
+
+        if not games:
             lines.append("⏳ <i>No hay partidos programados en las próximas 24 horas para las ligas monitoreadas.</i>")
 
+        buttons.append([InlineKeyboardButton("🎰 Ir a Generador de Combinadas", callback_data="btn_combinada_ayudante")])
         buttons.append([InlineKeyboardButton("🔙 Volver al Menú Principal", callback_data="btn_main_menu")])
 
         msg = "\n".join(lines)
@@ -699,10 +783,10 @@ async def build_assistant_matches_keyboard(action_type: str = "corners") -> tupl
 
         title_map = {
             "corners":     ("🚩 <b>AYUDANTE DE CÓRNERS (10 PARTIDOS)</b> 🚩", "crn", "Análisis estadístico sobre los últimos 10 partidos de cada equipo.\n\nSelecciona un partido próximo:"),
-            "players":     ("🎯 <b>AYUDANTE DE JUGADORES (TIROS & FALTAS)</b> 🎯", "ply", "🟢 = Alineación Oficial (~1h) | 🟡 = Once Habitual (Horas antes)\n\nSelecciona un partido próximo:"),
+            "players":     ("🎯 <b>AYUDANTE DE JUGADORES (TIROS & FALTAS)</b> 🎯", "hub", "🟢 = Alineación Oficial (~1h) | 🟡 = Once Habitual (Horas antes)\n\nSelecciona un partido para abrir sus opciones:"),
             "full":        ("📋 <b>ANÁLISIS COMPLETO (CÓRNERS + PROPS)</b> 📋", "ful", "Dossier completo: Córners (10 partidos) + Alineaciones y Props de Jugadores.\n\nSelecciona un partido próximo:"),
-            "oficiales":   ("🟢 <b>ALINEACIONES OFICIALES CONFIRMADAS (~1H)</b> 🟢", "ply", "Partidos a punto de empezar con los 11 titulares 100% confirmados por las ligas.\n\nSelecciona un partido para ver sus alineaciones y tiros/faltas:"),
-            "horas_antes": ("🟡 <b>PRE-PARTIDO HORAS ANTES (ONCE HABITUAL)</b> 🟡", "ply", "Partidos de hoy programados con antelación. Análisis previo con alineación probable y el Once Habitual (últimos 2-3 partidos).\n\nSelecciona un partido:")
+            "oficiales":   ("🟢 <b>ALINEACIONES OFICIALES CONFIRMADAS (~1H)</b> 🟢", "hub", "Partidos a punto de empezar con los 11 titulares 100% confirmados por las ligas.\n\nSelecciona un partido para ver titulares y mercados:"),
+            "horas_antes": ("🟡 <b>PRE-PARTIDO HORAS ANTES (ONCE HABITUAL)</b> 🟡", "hub", "Partidos de hoy programados con antelación. Análisis previo con Once Habitual (últimos 2-3 partidos).\n\nSelecciona un partido:")
         }
         header_title, prefix, subtitle = title_map.get(action_type, title_map["corners"])
 
@@ -765,21 +849,7 @@ async def build_assistant_matches_keyboard(action_type: str = "corners") -> tupl
 
 def get_assistant_navigation_keyboard(gid: str, current_view: str) -> InlineKeyboardMarkup:
     """Genera la botonera de navegación entre vistas de Córners, Jugadores y Completo."""
-    row = []
-    if current_view != "corners":
-        row.append(InlineKeyboardButton("🚩 Ver Córners", callback_data=f"crn_{gid}"))
-    if current_view != "players":
-        row.append(InlineKeyboardButton("🎯 Ver Jugadores", callback_data=f"ply_{gid}"))
-    if current_view != "full":
-        row.append(InlineKeyboardButton("📋 Ver Completo", callback_data=f"ful_{gid}"))
-
-    return InlineKeyboardMarkup([
-        row,
-        [
-            InlineKeyboardButton("⚽ Volver a Partidos", callback_data="btn_partidos_hoy"),
-            InlineKeyboardButton("🏠 Menú", callback_data="btn_main_menu")
-        ]
-    ])
+    return get_match_view_navigation_keyboard(gid, current_view)
 
 
 async def corners_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -906,83 +976,23 @@ async def ayudante_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -
 
 
 async def combinada_ayudante_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    """Genera un ticket combinado combinando líneas de Córners y Props de Jugadores."""
+    """Abre el Generador de Combinadas Personalizables (por cuota objetivo o por partido)."""
+    text = (
+        "🎰 <b>GENERADOR DE COMBINADAS PERSONALIZADAS</b> 🎰\n\n"
+        "Configura la combinada a tu medida según la cuota que buscas o el tipo de apuesta:\n\n"
+        "🎯 <b>Por Perfil de Cuota Objetivo (Multipartido):</b>\n"
+        "  • 🛡️ <b>Cuota Moderada (~2.00):</b> 2 selecciones de alta probabilidad (+EV seguro).\n"
+        "  • ⚖️ <b>Cuota Media (~3.00):</b> 3 selecciones balanceadas (tiros a puerta + córners).\n"
+        "  • 🚀 <b>Cuota Alta (4.50+):</b> 4 selecciones con mayor retorno (+1.5 tiros y faltas).\n\n"
+        "⚽ <b>Por Partido Individual (BetBuilder de Ambos Equipos):</b>\n"
+        "  • Combina selecciones de <b>ambos equipos</b> en un mismo encuentro (córners + disparos + faltas).\n\n"
+        "👇 <i>Selecciona una opción para generar tu ticket:</i>"
+    )
     if update.callback_query:
-        await update.callback_query.edit_message_text("🎰 <i>Calculando combinada especializada de Córners & Jugadores...</i>", parse_mode="HTML")
+        await update.callback_query.edit_message_text(text, parse_mode="HTML", reply_markup=get_combinadas_hub_keyboard())
     elif update.message:
-        await update.message.reply_html("🎰 <i>Calculando combinada especializada de Córners & Jugadores...</i>")
+        await update.message.reply_html(text, reply_markup=get_combinadas_hub_keyboard())
 
-    scraper = Scraper365()
-    try:
-        games = await scraper.fetch_assistant_matches(hours_ahead=24, min_tier=2)
-        if len(games) < 2:
-            msg = "⚠️ Se requieren al menos 2 partidos destacados programados para armar la combinada de Córners y Jugadores."
-            if update.callback_query:
-                await update.callback_query.edit_message_text(msg, reply_markup=get_back_keyboard())
-            elif update.message:
-                await update.message.reply_text(msg, reply_markup=get_back_keyboard())
-            return
-
-        # Analizar primer partido para córners
-        g1 = games[0]
-        c1 = await assistant_engine.analyze_match_corners(
-            scraper.session,
-            g1.get("homeCompetitor",{}).get("id"),
-            g1.get("awayCompetitor",{}).get("id"),
-            g1.get("homeCompetitor",{}).get("name"),
-            g1.get("awayCompetitor",{}).get("name"),
-            game_id=g1.get("id")
-        )
-
-        # Analizar segundo partido para props de jugador
-        g2 = games[1]
-        p2 = await assistant_engine.analyze_match_players(
-            scraper.session,
-            g2.get("id"),
-            g2.get("homeCompetitor",{}).get("id"),
-            g2.get("awayCompetitor",{}).get("id"),
-            g2.get("homeCompetitor",{}).get("name"),
-            g2.get("awayCompetitor",{}).get("name")
-        )
-
-        top_player = p2["top_shots_on_target"][0] if p2["top_shots_on_target"] else (p2["top_total_shots"][0] if p2["top_total_shots"] else None)
-
-        lines = [
-            "🎰 <b>COMBINADA ESPECIALIZADA (CÓRNERS + PROPS)</b> 🎰\n",
-            f"1️⃣ <b>{g1.get('homeCompetitor',{}).get('name')} vs {g1.get('awayCompetitor',{}).get('name')}</b>",
-            f"   🚩 Mercado: <b>{c1['recommended_line']}</b>",
-            f"   📊 Confianza: {c1['confidence']}% | Proyección: {c1['projected_total']} córners\n"
-        ]
-
-        if top_player:
-            lines.extend([
-                f"2️⃣ <b>{g2.get('homeCompetitor',{}).get('name')} vs {g2.get('awayCompetitor',{}).get('name')}</b>",
-                f"   🎯 Jugador: <b>{top_player['player']}</b> ({top_player['team']})",
-                f"   👉 Línea: <b>{top_player['line']}</b> [@ {top_player['odd']}]",
-                f"   📋 Alineación: {p2['lineup_status_text']}\n"
-            ])
-
-        lines.extend([
-            "💵 <b>CUOTA TOTAL ESTIMADA:</b> <code>2.40 - 2.95</code>",
-            "🏦 <b>STAKE RECOMENDADO:</b> <code>2 / 5</code>\n",
-            "💡 <i>Ticket generado a partir del análisis de últimos 10 partidos y promedios individuales.</i>"
-        ])
-
-        msg = "\n".join(lines)
-        if update.callback_query:
-            await update.callback_query.edit_message_text(msg, parse_mode="HTML", reply_markup=get_back_keyboard())
-        elif update.message:
-            await update.message.reply_html(msg, reply_markup=get_back_keyboard())
-
-    except Exception as e:
-        logger.error(f"Error generando combinada ayudante: {e}", exc_info=True)
-        err_msg = f"❌ Error armando combinada: {e}"
-        if update.callback_query:
-            await update.callback_query.edit_message_text(err_msg, reply_markup=get_back_keyboard())
-        elif update.message:
-            await update.message.reply_text(err_msg, reply_markup=get_back_keyboard())
-    finally:
-        await scraper.close()
 
 
 # ── Manejador de Botones Táctiles (Callback Queries) ──────────────────────────
@@ -1033,6 +1043,185 @@ async def button_callback_handler(update: Update, context: ContextTypes.DEFAULT_
 
     elif data == "btn_partidos_hoy":
         await jornada_command(update, context)
+
+    # Hub del Partido (hub_{gid})
+    elif data.startswith("hub_"):
+        target_gid = data.replace("hub_", "").strip()
+        await query.edit_message_text("⚽ <i>Cargando alineaciones y opciones del partido...</i>", parse_mode="HTML")
+        scraper = Scraper365()
+        try:
+            game_obj = await scraper.fetch_game_by_id(int(target_gid))
+            if not game_obj:
+                await query.edit_message_text("❌ No se pudo cargar la información del partido.", reply_markup=get_back_keyboard())
+                return
+            hid = game_obj.get("homeCompetitor", {}).get("id")
+            aid = game_obj.get("awayCompetitor", {}).get("id")
+            hn = game_obj.get("homeCompetitor", {}).get("name", "Local")
+            an = game_obj.get("awayCompetitor", {}).get("name", "Visitante")
+
+            p_data = await assistant_engine.analyze_match_players(scraper.session, int(target_gid), hid, aid, hn, an, game_obj=game_obj)
+            report = format_match_hub_message(game_obj, p_data)
+            await query.edit_message_text(report, parse_mode="HTML", reply_markup=get_match_hub_keyboard(target_gid))
+        except Exception as e:
+            logger.error(f"Error cargando hub del partido: {e}", exc_info=True)
+            await query.edit_message_text(f"❌ Error cargando partido: {e}", reply_markup=get_back_keyboard())
+        finally:
+            await scraper.close()
+
+    # Disparos Totales (shots_{gid})
+    elif data.startswith("shots_"):
+        target_gid = data.replace("shots_", "").strip()
+        await query.edit_message_text("🚀 <i>Analizando disparos totales de ambos equipos...</i>", parse_mode="HTML")
+        scraper = Scraper365()
+        try:
+            game_obj = await scraper.fetch_game_by_id(int(target_gid))
+            if not game_obj:
+                await query.edit_message_text("❌ No se pudo cargar la información del partido.", reply_markup=get_back_keyboard())
+                return
+            hid = game_obj.get("homeCompetitor", {}).get("id")
+            aid = game_obj.get("awayCompetitor", {}).get("id")
+            hn = game_obj.get("homeCompetitor", {}).get("name", "Local")
+            an = game_obj.get("awayCompetitor", {}).get("name", "Visitante")
+
+            p_data = await assistant_engine.analyze_match_players(scraper.session, int(target_gid), hid, aid, hn, an, game_obj=game_obj)
+            report = format_total_shots_report(p_data)
+            await query.edit_message_text(report, parse_mode="HTML", reply_markup=get_match_view_navigation_keyboard(target_gid, "shots"))
+        except Exception as e:
+            logger.error(f"Error analizando disparos totales: {e}", exc_info=True)
+            await query.edit_message_text(f"❌ Error analizando disparos: {e}", reply_markup=get_back_keyboard())
+        finally:
+            await scraper.close()
+
+    # Disparos a Puerta / Arco (sot_{gid})
+    elif data.startswith("sot_"):
+        target_gid = data.replace("sot_", "").strip()
+        await query.edit_message_text("🎯 <i>Analizando disparos a puerta de ambos equipos...</i>", parse_mode="HTML")
+        scraper = Scraper365()
+        try:
+            game_obj = await scraper.fetch_game_by_id(int(target_gid))
+            if not game_obj:
+                await query.edit_message_text("❌ No se pudo cargar la información del partido.", reply_markup=get_back_keyboard())
+                return
+            hid = game_obj.get("homeCompetitor", {}).get("id")
+            aid = game_obj.get("awayCompetitor", {}).get("id")
+            hn = game_obj.get("homeCompetitor", {}).get("name", "Local")
+            an = game_obj.get("awayCompetitor", {}).get("name", "Visitante")
+
+            p_data = await assistant_engine.analyze_match_players(scraper.session, int(target_gid), hid, aid, hn, an, game_obj=game_obj)
+            report = format_shots_on_target_report(p_data)
+            await query.edit_message_text(report, parse_mode="HTML", reply_markup=get_match_view_navigation_keyboard(target_gid, "sot"))
+        except Exception as e:
+            logger.error(f"Error analizando disparos a puerta: {e}", exc_info=True)
+            await query.edit_message_text(f"❌ Error analizando disparos a puerta: {e}", reply_markup=get_back_keyboard())
+        finally:
+            await scraper.close()
+
+    # Faltas Cometidas y Recibidas (fouls_{gid})
+    elif data.startswith("fouls_"):
+        target_gid = data.replace("fouls_", "").strip()
+        await query.edit_message_text("🟨 <i>Analizando faltas cometidas y recibidas de ambos equipos...</i>", parse_mode="HTML")
+        scraper = Scraper365()
+        try:
+            game_obj = await scraper.fetch_game_by_id(int(target_gid))
+            if not game_obj:
+                await query.edit_message_text("❌ No se pudo cargar la información del partido.", reply_markup=get_back_keyboard())
+                return
+            hid = game_obj.get("homeCompetitor", {}).get("id")
+            aid = game_obj.get("awayCompetitor", {}).get("id")
+            hn = game_obj.get("homeCompetitor", {}).get("name", "Local")
+            an = game_obj.get("awayCompetitor", {}).get("name", "Visitante")
+
+            p_data = await assistant_engine.analyze_match_players(scraper.session, int(target_gid), hid, aid, hn, an, game_obj=game_obj)
+            report = format_fouls_report(p_data)
+            await query.edit_message_text(report, parse_mode="HTML", reply_markup=get_match_view_navigation_keyboard(target_gid, "fouls"))
+        except Exception as e:
+            logger.error(f"Error analizando faltas: {e}", exc_info=True)
+            await query.edit_message_text(f"❌ Error analizando faltas: {e}", reply_markup=get_back_keyboard())
+        finally:
+            await scraper.close()
+
+    # Combinada de Este Partido (cmb_match_{gid})
+    elif data.startswith("cmb_match_"):
+        target_gid = data.replace("cmb_match_", "").strip()
+        await query.edit_message_text("🎰 <i>Construyendo combinada balanceada para este partido...</i>", parse_mode="HTML")
+        scraper = Scraper365()
+        try:
+            game_obj = await scraper.fetch_game_by_id(int(target_gid))
+            if not game_obj:
+                await query.edit_message_text("❌ No se pudo cargar la información del partido.", reply_markup=get_back_keyboard())
+                return
+            hid = game_obj.get("homeCompetitor", {}).get("id")
+            aid = game_obj.get("awayCompetitor", {}).get("id")
+            hn = game_obj.get("homeCompetitor", {}).get("name", "Local")
+            an = game_obj.get("awayCompetitor", {}).get("name", "Visitante")
+
+            f_data = await assistant_engine.analyze_full_match(scraper.session, int(target_gid), hid, aid, hn, an, game_obj=game_obj)
+            report = format_match_parlay_report(f_data)
+            await query.edit_message_text(report, parse_mode="HTML", reply_markup=get_match_view_navigation_keyboard(target_gid, "parlay"))
+        except Exception as e:
+            logger.error(f"Error armando combinada de partido: {e}", exc_info=True)
+            await query.edit_message_text(f"❌ Error armando combinada: {e}", reply_markup=get_back_keyboard())
+        finally:
+            await scraper.close()
+
+    # Combinada por Perfil de Cuota (cmb_prof_{profile})
+    elif data.startswith("cmb_prof_"):
+        profile = data.replace("cmb_prof_", "").strip()
+        profile_label = "Moderada (~2.00)" if profile == "moderada" else ("Alta (4.50+)" if profile == "alta" else "Media (~3.00)")
+        await query.edit_message_text(f"🎰 <i>Calculando combinada personalizada ({profile_label}) sobre los partidos de hoy...</i>", parse_mode="HTML")
+        scraper = Scraper365()
+        try:
+            games = await scraper.fetch_assistant_matches(hours_ahead=24, min_tier=2)
+            if not games:
+                await query.edit_message_text("⚠️ No hay suficientes partidos programados en las próximas 24h para generar combinadas.", reply_markup=get_combinadas_hub_keyboard())
+                return
+
+            matches_data = []
+            for g in games[:4]:
+                gid = g.get("id")
+                hid = g.get("homeCompetitor", {}).get("id")
+                aid = g.get("awayCompetitor", {}).get("id")
+                hn = g.get("homeCompetitor", {}).get("name", "Local")
+                an = g.get("awayCompetitor", {}).get("name", "Visitante")
+                f_data = await assistant_engine.analyze_full_match(scraper.session, int(gid), hid, aid, hn, an, game_obj=g)
+                matches_data.append(f_data)
+
+            report = format_custom_combinada_ticket(matches_data, profile=profile)
+            await query.edit_message_text(report, parse_mode="HTML", reply_markup=get_combinadas_hub_keyboard())
+        except Exception as e:
+            logger.error(f"Error armando combinada por perfil: {e}", exc_info=True)
+            await query.edit_message_text(f"❌ Error calculando combinada: {e}", reply_markup=get_combinadas_hub_keyboard())
+        finally:
+            await scraper.close()
+
+    # Selección de Partido para Combinada (cmb_choose_match)
+    elif data == "cmb_choose_match":
+        scraper = Scraper365()
+        try:
+            games = await scraper.fetch_assistant_matches(hours_ahead=24, min_tier=2)
+            if not games:
+                await query.edit_message_text("⏳ No hay partidos disponibles para armar combinada hoy.", reply_markup=get_combinadas_hub_keyboard())
+                return
+
+            buttons = []
+            for g in games[:8]:
+                gid = str(g.get("id"))
+                h = g.get("homeCompetitor", {}).get("name", "")[:12]
+                a = g.get("awayCompetitor", {}).get("name", "")[:12]
+                st = g.get("startTime", "")[11:16] if g.get("startTime") else "Hoy"
+                badge = "🟢" if g.get("is_lineup_confirmed") else "🟡"
+                buttons.append([InlineKeyboardButton(f"{badge} {h} vs {a} ({st})", callback_data=f"cmb_match_{gid}")])
+
+            buttons.append([InlineKeyboardButton("🔙 Volver al Hub de Combinadas", callback_data="btn_combinada_ayudante")])
+            buttons.append([InlineKeyboardButton("🏠 Menú Principal", callback_data="btn_main_menu")])
+
+            text = (
+                "🎰 <b>SELECCIONA UN PARTIDO PARA CREAR SU COMBINADA</b> 🎰\n\n"
+                "Elige cualquier partido de la lista para generar un ticket balanceado combinando remates, córners y faltas de ambos equipos:"
+            )
+            await query.edit_message_text(text, parse_mode="HTML", reply_markup=InlineKeyboardMarkup(buttons))
+        finally:
+            await scraper.close()
 
     # Detalle de Córners (crn_{gid})
     elif data.startswith("crn_"):

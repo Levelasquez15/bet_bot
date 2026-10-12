@@ -98,17 +98,25 @@ class PlayersAssistant:
         enriched_home = await self._enrich_players_stats(client, h_starters, h_recent_ids, home_id)
         enriched_away = await self._enrich_players_stats(client, a_starters, a_recent_ids, away_id)
 
-        # Seleccionar las mejores apuestas de jugador
-        top_shots_on_target = self._select_top_shots_on_target(enriched_home, enriched_away, home_name, away_name)
-        top_total_shots = self._select_top_total_shots(enriched_home, enriched_away, home_name, away_name)
-        top_fouls_committed = self._select_top_fouls_committed(enriched_home, enriched_away, home_name, away_name)
-        top_fouls_received = self._select_top_fouls_received(enriched_home, enriched_away, home_name, away_name)
+        # Seleccionar las mejores apuestas contemplando AMBOS equipos
+        home_sot, away_sot = self._select_team_shots_on_target(enriched_home, enriched_away, home_name, away_name)
+        home_shots, away_shots = self._select_team_total_shots(enriched_home, enriched_away, home_name, away_name)
+        home_fc, away_fc = self._select_team_fouls_committed(enriched_home, enriched_away, home_name, away_name)
+        home_fr, away_fr = self._select_team_fouls_received(enriched_home, enriched_away, home_name, away_name)
 
-        # Combinada de props de jugador
-        player_parlay = self._build_player_parlay(top_shots_on_target, top_total_shots, top_fouls_committed)
+        # Listas combinadas para compatibilidad
+        top_shots_on_target = home_sot + away_sot
+        top_total_shots = home_shots + away_shots
+        top_fouls_committed = home_fc + away_fc
+        top_fouls_received = home_fr + away_fr
+
+        # Combinada de props de jugador contemplando AMBOS equipos
+        player_parlay = self._build_balanced_player_parlay(home_sot, away_sot, home_shots, away_shots, home_fc, away_fc)
 
         return {
             "match": f"{home_name} vs {away_name}",
+            "home_name": home_name,
+            "away_name": away_name,
             "is_confirmed": is_confirmed,
             "lineup_status_text": lineup_status_text,
             "formation_home": formation_home,
@@ -117,6 +125,14 @@ class PlayersAssistant:
             "away_starters_count": len(a_starters),
             "home_starters": enriched_home,
             "away_starters": enriched_away,
+            "home_shots_on_target": home_sot,
+            "away_shots_on_target": away_sot,
+            "home_total_shots": home_shots,
+            "away_total_shots": away_shots,
+            "home_fouls_committed": home_fc,
+            "away_fouls_committed": away_fc,
+            "home_fouls_received": home_fr,
+            "away_fouls_received": away_fr,
             "top_shots_on_target": top_shots_on_target,
             "top_total_shots": top_total_shots,
             "top_fouls_committed": top_fouls_committed,
@@ -352,110 +368,165 @@ class PlayersAssistant:
 
         return players
 
-    def _select_top_shots_on_target(self, h_players: list, a_players: list, home_name: str, away_name: str) -> List[Dict[str, Any]]:
-        """Selecciona las mejores 3 opciones de tiros a puerta / remates al arco."""
-        all_p = [dict(p, team=home_name) for p in h_players] + [dict(p, team=away_name) for p in a_players]
-        # Filtrar porteros
-        candidates = [p for p in all_p if "portero" not in p.get("position", "").lower()]
-        candidates.sort(key=lambda x: x.get("avg_sot", 0), reverse=True)
+    def _select_team_shots_on_target(
+        self, h_players: list, a_players: list, home_name: str, away_name: str
+    ) -> tuple[List[Dict[str, Any]], List[Dict[str, Any]]]:
+        """Selecciona las mejores opciones de tiros al arco para CADA equipo."""
+        def _get_top(players, team):
+            out = []
+            cand = [p for p in players if "portero" not in p.get("position", "").lower()]
+            cand.sort(key=lambda x: x.get("avg_sot", 0), reverse=True)
+            for p in cand[:2]:
+                avg = p.get("avg_sot", 0)
+                line = "+0.5 Disparos a Puerta" if avg < 1.8 else "+1.5 Disparos a Puerta"
+                odd = "1.50 - 1.70" if line == "+0.5 Disparos a Puerta" else "1.85 - 2.15"
+                out.append({
+                    "player": p["name"],
+                    "team": team,
+                    "position": p.get("position", "Atacante"),
+                    "line": line,
+                    "avg": avg,
+                    "odd": odd,
+                    "confidence": min(88.0, round(60.0 + avg * 18.0, 1))
+                })
+            return out
 
-        picks = []
-        for p in candidates[:3]:
-            avg = p.get("avg_sot", 0)
-            line = "+0.5 Disparos a Puerta" if avg < 1.8 else "+1.5 Disparos a Puerta"
-            odd = "1.50 - 1.70" if line == "+0.5 Disparos a Puerta" else "1.85 - 2.15"
-            picks.append({
-                "player": p["name"],
-                "team": p["team"],
-                "position": p.get("position", "Atacante"),
-                "line": line,
-                "avg": avg,
-                "odd": odd,
-                "confidence": min(88.0, round(60.0 + avg * 18.0, 1))
-            })
-        return picks
+        return _get_top(h_players, home_name), _get_top(a_players, away_name)
+
+    def _select_team_total_shots(
+        self, h_players: list, a_players: list, home_name: str, away_name: str
+    ) -> tuple[List[Dict[str, Any]], List[Dict[str, Any]]]:
+        """Selecciona las mejores opciones de disparos totales para CADA equipo."""
+        def _get_top(players, team):
+            out = []
+            cand = [p for p in players if "portero" not in p.get("position", "").lower()]
+            cand.sort(key=lambda x: x.get("avg_shots", 0), reverse=True)
+            for p in cand[:2]:
+                avg = p.get("avg_shots", 0)
+                line = "+1.5 Disparos Totales" if avg < 2.8 else "+2.5 Disparos Totales"
+                odd = "1.55 - 1.75" if line == "+1.5 Disparos Totales" else "1.85 - 2.20"
+                out.append({
+                    "player": p["name"],
+                    "team": team,
+                    "position": p.get("position", "Atacante"),
+                    "line": line,
+                    "avg": avg,
+                    "odd": odd,
+                    "confidence": min(89.0, round(58.0 + avg * 12.0, 1))
+                })
+            return out
+
+        return _get_top(h_players, home_name), _get_top(a_players, away_name)
+
+    def _select_team_fouls_committed(
+        self, h_players: list, a_players: list, home_name: str, away_name: str
+    ) -> tuple[List[Dict[str, Any]], List[Dict[str, Any]]]:
+        """Selecciona las mejores opciones de faltas cometidas para CADA equipo."""
+        def _get_top(players, team):
+            out = []
+            cand = [p for p in players if "portero" not in p.get("position", "").lower()]
+            cand.sort(key=lambda x: x.get("avg_fouls_comm", 0), reverse=True)
+            for p in cand[:2]:
+                avg = p.get("avg_fouls_comm", 0)
+                out.append({
+                    "player": p["name"],
+                    "team": team,
+                    "position": p.get("position", "Pivote / Defensor"),
+                    "line": "+1.5 Faltas Cometidas",
+                    "avg": avg,
+                    "odd": "1.60 - 1.85",
+                    "confidence": min(86.0, round(60.0 + avg * 14.0, 1))
+                })
+            return out
+
+        return _get_top(h_players, home_name), _get_top(a_players, away_name)
+
+    def _select_team_fouls_received(
+        self, h_players: list, a_players: list, home_name: str, away_name: str
+    ) -> tuple[List[Dict[str, Any]], List[Dict[str, Any]]]:
+        """Selecciona las mejores opciones de faltas recibidas para CADA equipo."""
+        def _get_top(players, team):
+            out = []
+            cand = [p for p in players if "portero" not in p.get("position", "").lower()]
+            cand.sort(key=lambda x: x.get("avg_fouls_rec", 0), reverse=True)
+            for p in cand[:2]:
+                avg = p.get("avg_fouls_rec", 0)
+                out.append({
+                    "player": p["name"],
+                    "team": team,
+                    "position": p.get("position", "Atacante / Extremo"),
+                    "line": "+1.5 Faltas Recibidas",
+                    "avg": avg,
+                    "odd": "1.65 - 1.90",
+                    "confidence": min(85.0, round(58.0 + avg * 14.0, 1))
+                })
+            return out
+
+        return _get_top(h_players, home_name), _get_top(a_players, away_name)
+
+    def _select_top_shots_on_target(self, h_players: list, a_players: list, home_name: str, away_name: str) -> List[Dict[str, Any]]:
+        h, a = self._select_team_shots_on_target(h_players, a_players, home_name, away_name)
+        combined = h + a
+        combined.sort(key=lambda x: x.get("avg", 0), reverse=True)
+        return combined[:3]
 
     def _select_top_total_shots(self, h_players: list, a_players: list, home_name: str, away_name: str) -> List[Dict[str, Any]]:
-        """Selecciona las mejores 3 opciones de tiros totales."""
-        all_p = [dict(p, team=home_name) for p in h_players] + [dict(p, team=away_name) for p in a_players]
-        candidates = [p for p in all_p if "portero" not in p.get("position", "").lower()]
-        candidates.sort(key=lambda x: x.get("avg_shots", 0), reverse=True)
-
-        picks = []
-        for p in candidates[:3]:
-            avg = p.get("avg_shots", 0)
-            line = "+1.5 Disparos Totales" if avg < 2.8 else "+2.5 Disparos Totales"
-            odd = "1.55 - 1.75" if line == "+1.5 Disparos Totales" else "1.85 - 2.20"
-            picks.append({
-                "player": p["name"],
-                "team": p["team"],
-                "position": p.get("position", "Atacante"),
-                "line": line,
-                "avg": avg,
-                "odd": odd,
-                "confidence": min(89.0, round(58.0 + avg * 12.0, 1))
-            })
-        return picks
+        h, a = self._select_team_total_shots(h_players, a_players, home_name, away_name)
+        combined = h + a
+        combined.sort(key=lambda x: x.get("avg", 0), reverse=True)
+        return combined[:3]
 
     def _select_top_fouls_committed(self, h_players: list, a_players: list, home_name: str, away_name: str) -> List[Dict[str, Any]]:
-        """Selecciona las mejores opciones de faltas cometidas por jugadores."""
-        all_p = [dict(p, team=home_name) for p in h_players] + [dict(p, team=away_name) for p in a_players]
-        candidates = [p for p in all_p if "portero" not in p.get("position", "").lower()]
-        candidates.sort(key=lambda x: x.get("avg_fouls_comm", 0), reverse=True)
-
-        picks = []
-        for p in candidates[:2]:
-            avg = p.get("avg_fouls_comm", 0)
-            picks.append({
-                "player": p["name"],
-                "team": p["team"],
-                "position": p.get("position", "Pivote / Defensor"),
-                "line": "+1.5 Faltas Cometidas",
-                "avg": avg,
-                "odd": "1.60 - 1.85",
-                "confidence": min(86.0, round(60.0 + avg * 14.0, 1))
-            })
-        return picks
+        h, a = self._select_team_fouls_committed(h_players, a_players, home_name, away_name)
+        combined = h + a
+        combined.sort(key=lambda x: x.get("avg", 0), reverse=True)
+        return combined[:2]
 
     def _select_top_fouls_received(self, h_players: list, a_players: list, home_name: str, away_name: str) -> List[Dict[str, Any]]:
-        """Selecciona las mejores opciones de faltas recibidas por jugadores."""
-        all_p = [dict(p, team=home_name) for p in h_players] + [dict(p, team=away_name) for p in a_players]
-        candidates = [p for p in all_p if "portero" not in p.get("position", "").lower()]
-        candidates.sort(key=lambda x: x.get("avg_fouls_rec", 0), reverse=True)
+        h, a = self._select_team_fouls_received(h_players, a_players, home_name, away_name)
+        combined = h + a
+        combined.sort(key=lambda x: x.get("avg", 0), reverse=True)
+        return combined[:2]
 
-        picks = []
-        for p in candidates[:2]:
-            avg = p.get("avg_fouls_rec", 0)
-            picks.append({
-                "player": p["name"],
-                "team": p["team"],
-                "position": p.get("position", "Atacante / Extremo"),
-                "line": "+1.5 Faltas Recibidas",
-                "avg": avg,
-                "odd": "1.65 - 1.90",
-                "confidence": min(85.0, round(58.0 + avg * 14.0, 1))
-            })
-        return picks
-
-    def _build_player_parlay(self, sot_picks: list, shot_picks: list, foul_picks: list) -> str:
-        """Arma una combinada de props de jugador optimizada."""
+    def _build_balanced_player_parlay(
+        self,
+        h_sot: list, a_sot: list,
+        h_shots: list, a_shots: list,
+        h_fouls: list, a_fouls: list
+    ) -> str:
+        """Arma una combinada de props de jugador contemplando rigurosamente AMBOS equipos."""
         legs = []
-        if sot_picks:
-            top_sot = sot_picks[0]
-            legs.append(f"  1️⃣ <b>{top_sot['player']}</b> ({top_sot['team']}): {top_sot['line']} (Prom: {top_sot['avg']})")
-        if shot_picks and len(shot_picks) > 1:
-            top_shot = shot_picks[1]
-            legs.append(f"  2️⃣ <b>{top_shot['player']}</b> ({top_shot['team']}): {top_shot['line']} (Prom: {top_shot['avg']})")
-        if foul_picks:
-            top_foul = foul_picks[0]
-            legs.append(f"  3️⃣ <b>{top_foul['player']}</b> ({top_foul['team']}): {top_foul['line']} (Prom: {top_foul['avg']})")
+        # Pierna 1: del equipo Local
+        if h_sot:
+            p = h_sot[0]
+            legs.append(f"  1️⃣ 🏠 <b>{p['player']}</b> ({p['team']}): {p['line']} (Prom: {p['avg']})")
+        elif h_shots:
+            p = h_shots[0]
+            legs.append(f"  1️⃣ 🏠 <b>{p['player']}</b> ({p['team']}): {p['line']} (Prom: {p['avg']})")
+
+        # Pierna 2: del equipo Visitante
+        if a_sot:
+            p = a_sot[0]
+            legs.append(f"  2️⃣ ✈️ <b>{p['player']}</b> ({p['team']}): {p['line']} (Prom: {p['avg']})")
+        elif a_shots:
+            p = a_shots[0]
+            legs.append(f"  2️⃣ ✈️ <b>{p['player']}</b> ({p['team']}): {p['line']} (Prom: {p['avg']})")
+        elif a_fouls:
+            p = a_fouls[0]
+            legs.append(f"  2️⃣ ✈️ <b>{p['player']}</b> ({p['team']}): {p['line']} (Prom: {p['avg']})")
+
+        # Pierna 3: faltas (cometidas o recibidas del equipo que corresponda)
+        if len(legs) < 3:
+            foul_cand = a_fouls[0] if (a_fouls and not any(p['team'] == a_fouls[0]['team'] for p in [h_sot[0]] if h_sot)) else (h_fouls[0] if h_fouls else None)
+            if foul_cand and foul_cand['player'] not in [x.split('<b>')[1].split('</b>')[0] for x in legs]:
+                legs.append(f"  3️⃣ 🟨 <b>{foul_cand['player']}</b> ({foul_cand['team']}): {foul_cand['line']} (Prom: {foul_cand['avg']})")
 
         if not legs:
             return "No se encontraron suficientes selecciones de jugador para armar una combinada."
 
         legs_text = "\n".join(legs)
         return (
-            f"🎰 <b>Combinada de Props de Jugador Sugerida:</b>\n"
+            f"🎰 <b>Combinada de Props (Ambos Equipos Contemplados):</b>\n"
             f"{legs_text}\n"
-            f"💵 <i>Cuota Estimada Combinada: 2.20 - 2.80</i>"
+            f"💵 <i>Cuota Estimada Combinada: 2.45 - 3.20</i>"
         )
