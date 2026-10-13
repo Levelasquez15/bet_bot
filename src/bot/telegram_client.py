@@ -419,8 +419,18 @@ async def ticket_photo_handler(update: Update, context: ContextTypes.DEFAULT_TYP
         photo_bytes = bytes(await photo_file.download_as_bytearray())
         caption = update.message.caption or ""
 
-        # Parsear imagen con Gemini Vision
+        # Parsear imagen con Gemini Vision u OCR gratuito y verificar con 365scores
         ticket_data = await ticket_parser.parse_ticket_image(photo_bytes, caption=caption)
+
+        if not ticket_data.get("legs"):
+            err_msg = ticket_data.get("error") or "No se pudieron identificar las líneas del boleto en la imagen."
+            await status_msg.edit_text(
+                f"❌ <b>No se pudo auditar la imagen:</b>\n\n<i>{err_msg}</i>\n\n"
+                "💡 <i>Asegúrate de que la foto sea nítida o escribe las selecciones con /ticket.</i>",
+                parse_mode="HTML",
+                reply_markup=get_back_keyboard()
+            )
+            return
 
         # Registrar en el Grafo de Conocimiento y obtener lecciones aprendidas
         insights = knowledge_graph.record_ticket_outcome(ticket_data, chat_id=chat_id)
@@ -450,11 +460,15 @@ async def ticket_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
     args = context.args
     if args:
         text = " ".join(args)
-        ticket_data = ticket_parser._heuristic_fallback(text)
-        chat_id = update.effective_chat.id if update.effective_chat else 0
-        insights = knowledge_graph.record_ticket_outcome(ticket_data, chat_id=chat_id)
-        report = format_ticket_audit_report(ticket_data, insights)
-        await update.message.reply_html(report, reply_markup=get_back_keyboard())
+        status_msg = await update.message.reply_html("🔍 <i>Auditando ticket y verificando estadísticas reales en 365scores...</i>")
+        try:
+            ticket_data = await ticket_parser.parse_text_ticket(text)
+            chat_id = update.effective_chat.id if update.effective_chat else 0
+            insights = knowledge_graph.record_ticket_outcome(ticket_data, chat_id=chat_id)
+            report = format_ticket_audit_report(ticket_data, insights)
+            await status_msg.edit_text(report, parse_mode="HTML", reply_markup=get_back_keyboard())
+        except Exception as e:
+            await status_msg.edit_text(f"❌ <b>Error auditando ticket:</b> {e}", parse_mode="HTML", reply_markup=get_back_keyboard())
     else:
         await update.message.reply_html(
             "📸 <b>AUDITOR DE TICKETS & COMBINADAS</b> 📸\n\n"

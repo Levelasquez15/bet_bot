@@ -175,6 +175,47 @@ class TestKnowledgeGraphSuite(unittest.IsolatedAsyncioTestCase):
             self.assertIn("+1.5 Disparos Totales", report)
             self.assertIn("APRENDIZAJE DEL GRAFO DE CONOCIMIENTO", report)
 
+    def test_ocr_parser_extracts_betano_ticket(self):
+        """Valida que el parser de texto OCR procese correctamente boletos de Betano con múltiples selecciones."""
+        raw_ocr = (
+            "Betano\nDoble\n7.36\nBet Builder 2.30\nTorino FC\nUdinese Calcio\n"
+            "Más de 3.5 Torino FC Tiros de esquina Menos/Más\n"
+            "2+ Rolando Mandragora Remates totales\n"
+            "1+ Jurgen Ekkelenkamp Remates totales\n"
+            "Bet Builder 3.20\nCoventry City\nNewcastle United\n"
+            "1+ Joe Willock Tiros al Arco\n"
+            "Bobby Thomas Remates totales\n"
+            "Caleb Yirenkyi Faltas Cometidas\n"
+            "Más de 3.5 Coventry City Tiros de esquina Menos/Más\n"
+        )
+        parsed = self.parser._parse_ocr_text_to_ticket(raw_ocr)
+        self.assertEqual(parsed["bookmaker"], "Betano")
+        self.assertEqual(parsed["total_odd"], 7.36)
+        self.assertEqual(len(parsed["legs"]), 7)
+
+        # Verificar nombres de jugadores y mercados detectados
+        players = [l.get("player") for l in parsed["legs"] if l.get("player")]
+        self.assertIn("Rolando Mandragora", players)
+        self.assertIn("Jurgen Ekkelenkamp", players)
+        self.assertIn("Joe Willock", players)
+        self.assertIn("Bobby Thomas", players)
+        self.assertIn("Caleb Yirenkyi", players)
+
+    async def test_no_fake_fallback_when_empty(self):
+        """Valida que NUNCA se devuelvan datos ficticios (ej. Barcelona/Lewandowski) si la imagen está vacía."""
+        with patch.object(self.parser, "_call_gemini_vision", new_callable=AsyncMock) as mock_gemini, \
+             patch.object(self.parser, "_call_free_ocr_space", new_callable=AsyncMock) as mock_ocr:
+            mock_gemini.return_value = None
+            mock_ocr.return_value = ""
+
+            parsed = await self.parser.parse_ticket_image(b"empty_image", caption="")
+            self.assertEqual(parsed["overall_status"], "ERROR")
+            self.assertEqual(len(parsed["legs"]), 0)
+            self.assertIn("error", parsed)
+            self.assertNotIn("Barcelona", str(parsed))
+            self.assertNotIn("Lewandowski", str(parsed))
+
 
 if __name__ == "__main__":
     unittest.main()
+
