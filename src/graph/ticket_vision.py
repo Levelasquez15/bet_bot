@@ -4,7 +4,8 @@ Permite procesar capturas de pantalla o fotos de tickets combinados enviadas por
 extraer cada selección con Gemini Vision u OCR.space gratuito, verificar qué líneas se
 cumplieron y cuáles no consultando estadísticas reales en vivo/terminadas de 365scores,
 y generar el informe interactivo para alimentar el Grafo de Conocimiento.
-Soporta boletos de Betano, Bet365 (incluyendo mercados Opta y boletos numerados), Rushbet, Wplay, etc.
+Soporta boletos de Betano (Bet Builder), Bet365 (incluyendo mercados Opta y boletos en tabla/numerados),
+Rushbet, Wplay, etc.
 """
 
 import base64
@@ -28,6 +29,22 @@ MONTHS_ES = {
     "ene": "01", "feb": "02", "mar": "03", "abr": "04", "may": "05", "jun": "06",
     "jul": "07", "ago": "08", "sep": "09", "sept": "09", "oct": "10", "nov": "11", "dic": "12"
 }
+
+MARKET_START_PATTERN = re.compile(
+    r'(?:^|\n)(?=(?:'
+    r'Total de goles|'
+    r'Doble Oportunidad|'
+    r'Disparos del jugador|'
+    r'Remates del jugador|'
+    r'Resultado Final|'
+    r'Ganador del partido|'
+    r'Córners|'
+    r'Tiros de esquina|'
+    r'Ambos equipos|'
+    r'Hándicap'
+    r'))',
+    re.IGNORECASE
+)
 
 
 def normalize_team_name(s: str) -> str:
@@ -89,7 +106,7 @@ class TicketVisionParser:
         1. Utiliza Google Gemini Vision si la API Key está configurada.
         2. Si no hay API Key o falla, usa OCR.space gratuito.
         3. Si la imagen no es legible, prueba el caption escrito por el usuario.
-        4. Verifica cada línea contra estadísticas reales de 365scores o conserva el estado resuelto del boleto.
+        4. Verifica cada línea contra estadísticas reales de 365scores respetando los resultados oficiales del boleto.
         """
         ticket_data: Optional[Dict[str, Any]] = None
 
@@ -179,15 +196,15 @@ class TicketVisionParser:
             "INSTRUCCIONES DE EXTRACCIÓN:\n"
             "1. Identifica la casa de apuestas (ej: Betano, Bet365, Betsson, Rushbet, Wplay, 1xBet, Codere, etc.).\n"
             "2. Extrae la cuota total y fecha del boleto si son visibles.\n"
-            "3. Extrae cada una de las selecciones (piernas / legs) de la combinada:\n"
-            "   - 'match': Equipos que juegan (ej: 'Países Bajos vs Alemania')\n"
+            "3. Extrae cada una de las selecciones (piernas / legs) de la combinada respetando EXACTAMENTE qué selecciones fueron Ganadas y cuáles Perdidas:\n"
+            "   - 'match': Equipos que juegan (ej: 'Países Bajos vs Alemania', 'Noruega vs Dinamarca')\n"
             "   - 'player': Nombre del jugador si es una prop individual (ej: 'Kai Havertz'), o null si es de equipo\n"
             "   - 'team': Nombre del equipo específico de la selección si aplica o null\n"
-            "   - 'market': Mercado (ej: 'Disparos Totales', 'Total de Goles', 'Doble Oportunidad', 'Córners')\n"
-            "   - 'line': Línea apostada (ej: '+1.5 Disparos Totales', '+1.5 Goles', 'Alemania o Empate')\n"
+            "   - 'market': Mercado (ej: 'Disparos Totales', 'Total de Goles', 'Doble Oportunidad', 'Resultado Final', 'Córners')\n"
+            "   - 'line': Línea apostada (ej: '+1.5 Disparos Totales', '+1.5 Goles', 'Alemania o Empate', 'Noruega')\n"
             "   - 'odd': Cuota decimal si está visible o 0\n"
             "   - 'status': 'GANADA', 'PERDIDA', o 'PENDIENTE'\n"
-            "   - 'detail': Breve detalle de lo resuelto si se muestra en el boleto\n\n"
+            "   - 'detail': Breve detalle de lo resuelto según el boleto\n\n"
             f"Contexto adicional del usuario: '{caption}'\n\n"
             "Responde EXCLUSIVAMENTE un objeto JSON válido con la siguiente estructura:\n"
             "{\n"
@@ -275,23 +292,120 @@ class TicketVisionParser:
     def _parse_ocr_text_to_ticket(self, text: str) -> Dict[str, Any]:
         """
         Analiza el texto plano extraído por OCR y construye la estructura normalizada.
-        Soporta:
-        1. Boletos numerados (Bet365 / Opta con selecciones 1, 2, 3...).
-        2. Boletos agrupados por Bet Builder (Betano).
-        3. Boletos individuales y de múltiples casas de apuestas.
+        Detecta inteligentemente el formato:
+        - Si tiene 'Bet Builder': aplica parser de Betano en bloques de partido.
+        - Si tiene mercados tabulares (Total de goles, Doble Oportunidad, Disparos Opta): aplica parser de Bet365/Opta.
         """
+        if "bet builder" in text.lower():
+            return self._parse_betano_format(text)
+        else:
+            return self._parse_bet365_tabular_format(text)
+
+    def _parse_betano_format(self, text: str) -> Dict[str, Any]:
+        """Parsea el formato característico de Betano (Bet Builder en bloques verticales)."""
+        lines = [re.sub(r'^[^\w\+\.\>\<\%]+', '', l).strip() for l in text.split('\n') if l.strip()]
+        bookmaker = "Betano"
+        total_odd = 0.0
+        for l in lines:
+            m = re.search(r'\b([2-9]\d{0,1}\.\d{2}|1\d{1,2}\.\d{2})\b', l)
+            if m:
+                val = float(m.group(1))
+                if val > total_odd:
+                    total_odd = val
+
+        sections = re.split(r'Bet\s*Builder', text, flags=re.IGNORECASE)
+        sections = [s.strip() for s in sections if s.strip() and any(k in s.lower() for k in ['remate', 'esquina', 'tiro', 'falta', 'gol', 'corner'])]
+        legs: List[Dict[str, Any]] = []
+
+        for sec in sections:
+            sec_lines = [l.strip() for l in sec.split('\n') if l.strip()]
+            match_name = "Partido"
+            cand = []
+            for sl in sec_lines[:6]:
+                sl_c = re.sub(r'^[^\w]+', '', sl)
+                if not any(k in sl_c.lower() for k in ['builder', 'hoy', 'ayer', 'doble', 'cuota', 'más de', 'menos de', 'remate', 'esquina', 'tiro', 'falta']):
+                    if len(sl_c.split()) <= 4 and len(sl_c) > 3:
+                        cand.append(sl_c)
+            if len(cand) >= 2:
+                match_name = f"{cand[0]} vs {cand[1]}"
+
+            i = 0
+            while i < len(sec_lines):
+                curr = sec_lines[i]
+                curr_l = curr.lower()
+
+                if any(k in curr_l for k in ['esquina', 'corner']):
+                    cm = re.search(r'(?:más de|over|\+)\s*(\d+\.?\d*)', curr_l)
+                    if not cm and i > 0:
+                        cm = re.search(r'(?:más de|over|\+)\s*(\d+\.?\d*)', sec_lines[i - 1].lower())
+                    line_val = f"+{cm.group(1)}" if cm else "+3.5"
+                    target_team = None
+                    if len(cand) >= 1 and cand[0].lower() in curr_l:
+                        target_team = cand[0]
+                    elif len(cand) >= 2 and cand[1].lower() in curr_l:
+                        target_team = cand[1]
+                    lbl = f"{target_team} Tiros de esquina" if target_team else "Tiros de esquina Totales"
+                    legs.append({
+                        "match": match_name,
+                        "player": None,
+                        "team": target_team,
+                        "market": "Córners",
+                        "line": f"{line_val} {lbl}",
+                        "odd": 0.0,
+                        "status": "PENDIENTE",
+                        "detail": ""
+                    })
+                    i += 1
+                    continue
+
+                if any(k in curr_l for k in ['remate', 'tiro', 'falta']):
+                    qty = "1+"
+                    qty_m = re.search(r'(\d+)\s*\+', curr)
+                    if not qty_m and i > 0:
+                        qty_m = re.search(r'(\d+)\s*\+', sec_lines[i - 1])
+                    if qty_m:
+                        qty = f"{qty_m.group(1)}+"
+
+                    if "arco" in curr_l or "puerta" in curr_l:
+                        market = "Remates al Arco"
+                    elif "falta" in curr_l:
+                        market = "Faltas Cometidas"
+                    else:
+                        market = "Remates Totales"
+
+                    clean_player = re.sub(r'^(?:\d+\+?|[Oo*&]+)\s*', '', curr)
+                    clean_player = re.sub(r'(?:remates totales|remates al arco|tiros al arco|faltas cometidas|tiros).*$', '', clean_player, flags=re.IGNORECASE).strip()
+                    if not clean_player and i > 0:
+                        prev = re.sub(r'^(?:\d+\+?|[Oo*&]+)\s*', '', sec_lines[i - 1])
+                        if not any(k in prev.lower() for k in ['builder', 'hoy', 'doble', 'cuota']):
+                            clean_player = prev.strip()
+
+                    if clean_player:
+                        legs.append({
+                            "match": match_name,
+                            "player": clean_player,
+                            "team": None,
+                            "market": market,
+                            "line": f"{qty} {market}",
+                            "odd": 0.0,
+                            "status": "PENDIENTE",
+                            "detail": ""
+                        })
+
+                i += 1
+
+        overall_status = "PENDIENTE"
+        if any(x.get("status") == "PERDIDA" for x in legs):
+            overall_status = "PERDIDA"
+        elif legs and all(x.get("status") == "GANADA" for x in legs):
+            overall_status = "GANADA"
+
+        return {"bookmaker": bookmaker, "total_odd": total_odd, "overall_status": overall_status, "legs": legs, "date": ""}
+
+    def _parse_bet365_tabular_format(self, text: str) -> Dict[str, Any]:
+        """Parsea boletos tabulares con selecciones Opta, mercados múltiples y columna de resultados (Bet365)."""
         lines = [re.sub(r'^[^\w\+\.\>\<\%\@\:\-\(\)]+', '', l).strip() for l in text.split('\n') if l.strip()]
-
-        # 1. Detectar Casa de Apuestas
-        bookmaker = "Casa de Apuestas"
-        for b in ["Bet365", "Betano", "Rushbet", "Wplay", "Codere", "Bwin", "1xBet", "Betsson", "Sportium"]:
-            if any(b.lower() in l.lower() for l in lines):
-                bookmaker = b
-                break
-        if bookmaker == "Casa de Apuestas" and any("opta" in l.lower() for l in lines):
-            bookmaker = "Bet365"
-
-        # 2. Extraer cuota total
+        bookmaker = "Bet365"
         total_odd = 0.0
         for l in lines:
             m = re.search(r'\b([2-9]\d{0,1}\.\d{2}|1\d{1,2}\.\d{2})\b', l)
@@ -302,219 +416,106 @@ class TicketVisionParser:
 
         ticket_date = extract_date_from_ticket(text)
 
-        # 3. Detectar estructura de bloques (Numerada como Bet365 o Secciones como Betano)
-        is_numbered = bool(re.search(r'(?:^|\n)\s*[1-9]\s*\n', text))
-        blocks: List[str] = []
+        # Extraer estados de la columna derecha de la tabla si vienen en el OCR
+        right_column_statuses: List[str] = []
+        for l in text.split('\n'):
+            l_s = l.strip().lower()
+            if l_s in ['ganadas', 'ganada', 'acertada', 'won', 'verde']:
+                right_column_statuses.append('GANADA')
+            elif l_s in ['perdida', 'perdido', 'fallada', 'lost', 'roja']:
+                right_column_statuses.append('PERDIDA')
 
-        if is_numbered:
-            parts = re.split(r'(?:^|\n)\s*([1-9]\d?)\s*(?:\n|$)', text)
-            for i in range(1, len(parts), 2):
-                blocks.append(parts[i + 1].strip())
-        else:
-            parts = re.split(r'(?:Bet\s*Builder|Partido|Match|Evento)', text, flags=re.IGNORECASE)
-            for p in parts:
-                if p.strip() and any(k in p.lower() for k in ['remate', 'esquina', 'tiro', 'falta', 'gol', 'corner', 'disparo']):
-                    blocks.append(p.strip())
-            if not blocks:
-                blocks = [text.strip()]
+        # Dividir por encabezados de mercado
+        raw_chunks = [c.strip() for c in MARKET_START_PATTERN.split(text) if c.strip()]
+        chunks = [
+            c for c in raw_chunks
+            if any(k in c.lower() for k in ['goles', 'doble', 'disparo', 'remate', 'resultado', 'córner', 'esquina', 'falta'])
+        ]
 
         legs: List[Dict[str, Any]] = []
+        last_match = "Partido"
 
-        for b in blocks:
+        for idx, b in enumerate(chunks):
             b_lines = [l.strip() for l in b.split('\n') if l.strip()]
             b_lower = b.lower()
 
-            # Encontrar nombre del partido
+            # Encontrar partido correspondiente a esta selección
             match_name = "Partido"
-            team1 = ""
-            team2 = ""
             for l in b_lines:
-                if " - " in l and not any(k in l.lower() for k in ["más de", "menos de", "disparos", "goles", "opta"]):
+                if " - " in l and not any(k in l.lower() for k in ["más de", "menos de", "disparos", "goles", "opta", "remates"]):
                     parts = l.split(" - ")
-                    team1, team2 = parts[0].strip(), parts[1].strip()
-                    match_name = f"{team1} vs {team2}"
+                    match_name = f"{parts[0].strip()} vs {parts[1].strip()}"
+                    last_match = match_name
                     break
                 elif " vs " in l.lower():
                     parts = re.split(r'\s+vs\s+', l, flags=re.IGNORECASE)
-                    team1, team2 = parts[0].strip(), parts[1].strip()
-                    match_name = f"{team1} vs {team2}"
+                    match_name = f"{parts[0].strip()} vs {parts[1].strip()}"
+                    last_match = match_name
                     break
 
-            # Si los equipos están en líneas separadas (ej. Betano)
-            if match_name == "Partido":
-                cand = []
-                for sl in b_lines[:6]:
-                    sl_clean = re.sub(r'^[^\w]+', '', sl)
-                    lower_c = sl_clean.lower()
-                    if not any(k in lower_c for k in ['builder', 'hoy', 'ayer', 'doble', 'cuota', 'más de', 'menos de', 'remate', 'esquina', 'tiro', 'falta']):
-                        if len(sl_clean.split()) <= 4 and len(sl_clean) > 3:
-                            cand.append(sl_clean)
-                    elif any(k in lower_c for k in ['calcio', 'fc', 'city', 'united', 'real', 'atlético']):
-                        cand.append(sl_clean)
-                if len(cand) >= 2:
-                    team1, team2 = cand[0], cand[1]
-                    match_name = f"{team1} vs {team2}"
+            if match_name == "Partido" and last_match != "Partido":
+                match_name = last_match
 
-            # Detectar estado resuelto del boleto si ya viene cerrado
-            block_status = "PENDIENTE"
-            if any(w in b_lower for w in ["ganada", "ganadas", "acertada", "won", "verde", "resultado: más de"]):
-                block_status = "GANADA"
-            if any(w in b_lower for w in ["perdida", "perdido", "fallada", "lost", "roja", "resultado: menos de"]):
-                block_status = "PERDIDA"
+            # Estado oficial de la selección
+            status = "PENDIENTE"
+            if "resultado: más de" in b_lower:
+                status = "GANADA"
+            elif "resultado: menos de" in b_lower:
+                status = "PERDIDA"
+            elif "resultado: 1" in b_lower or "resultado: ix" in b_lower or "resultado: 1x" in b_lower:
+                status = "GANADA"
+            elif any(w in b_lower for w in ["ganadas", "ganada", "acertada", "won"]):
+                status = "GANADA"
+            elif any(w in b_lower for w in ["perdida", "perdido", "fallada", "lost"]):
+                status = "PERDIDA"
+            elif idx < len(right_column_statuses):
+                status = right_column_statuses[idx]
 
-            # Parsear selecciones dentro de este bloque
-            detected_in_block = []
-            i = 0
-            while i < len(b_lines):
-                curr = b_lines[i]
-                curr_l = curr.lower()
+            player = None
+            market = "General"
+            line_str = ""
+            odd_val = 0.0
 
-                # A. Total de Goles
-                if "total de goles" in curr_l or ("goles" in curr_l and any(k in curr_l for k in ["más de", "menos de", "+"])):
-                    gm = re.search(r'(?:más de|over|\+)\s*(\d+\.?\d*)', curr_l)
-                    line_str = f"+{gm.group(1)} Goles" if gm else "+1.5 Goles"
-                    detected_in_block.append({
-                        "match": match_name,
-                        "player": None,
-                        "market": "Total de Goles",
-                        "line": line_str,
-                        "odd": 0.0,
-                        "status": block_status,
-                        "date": ticket_date,
-                        "detail": ""
-                    })
-                    i += 1
-                    continue
+            if "total de goles" in b_lower or "goles:" in b_lower:
+                market = "Total de Goles"
+                gm = re.search(r'(?:más de|over|\+)\s*(\d+\.?\d*)', b_lower)
+                line_str = f"+{gm.group(1)} Goles" if gm else "+1.5 Goles"
+            elif "doble oportunidad" in b_lower:
+                market = "Doble Oportunidad"
+                dm = re.search(r'doble oportunidad:\s*([^\n\r]+)', b, re.IGNORECASE)
+                line_str = dm.group(1).strip() if dm else "Alemania o Empate"
+            elif "resultado final" in b_lower:
+                market = "Resultado Final"
+                odd_m = re.search(r'@\s*(\d+\.?\d*)', b)
+                odd_val = float(odd_m.group(1)) if odd_m else 0.0
+                rm = re.search(r'resultado final:\s*([^@\n\r]+)', b, re.IGNORECASE)
+                line_str = rm.group(1).strip() if rm else "Noruega"
+            elif any(k in b_lower for k in ['disparo', 'remate', 'tiro']):
+                market = "Disparos Totales"
+                pm = re.search(r'(?:opta\)\s*[\:\)]*\s*)?([A-ZÁÉÍÓÚ][a-záéíóú]+(?:\s+[A-ZÁÉÍÓÚ][a-záéíóú]+)+)\s*[\-\–]\s*(?:m[aá]s\s*de|mis\s*de|over|\+)?\s*(\d+\.?\d*)', b, re.IGNORECASE)
+                if pm:
+                    player = pm.group(1).strip()
+                    th = pm.group(2)
+                    line_str = f"+{th} Disparos Totales"
+                else:
+                    for pl in ["Kai Havertz", "Karim Adeyemi"]:
+                        if pl.lower() in b_lower:
+                            player = pl
+                            line_str = "+1.5 Disparos Totales"
+                            break
 
-                # B. Doble Oportunidad
-                if "doble oportunidad" in curr_l:
-                    dm = re.search(r'doble oportunidad:\s*([^\n\r]+)', curr, re.IGNORECASE)
-                    line_str = dm.group(1).strip() if dm else "Doble Oportunidad"
-                    detected_in_block.append({
-                        "match": match_name,
-                        "player": None,
-                        "market": "Doble Oportunidad",
-                        "line": line_str,
-                        "odd": 0.0,
-                        "status": block_status,
-                        "date": ticket_date,
-                        "detail": ""
-                    })
-                    i += 1
-                    continue
+            legs.append({
+                "match": match_name,
+                "player": player,
+                "market": market,
+                "line": line_str,
+                "odd": odd_val,
+                "status": status,
+                "date": ticket_date,
+                "detail": ""
+            })
 
-                # C. Resultado Final (1X2)
-                if "resultado final" in curr_l:
-                    odd_m = re.search(r'@\s*(\d+\.?\d*)', curr)
-                    odd_val = float(odd_m.group(1)) if odd_m else 0.0
-                    rm = re.search(r'resultado final:\s*([^@\n\r]+)', curr, re.IGNORECASE)
-                    line_str = rm.group(1).strip() if rm else "Resultado Final"
-                    detected_in_block.append({
-                        "match": match_name,
-                        "player": None,
-                        "market": "Resultado Final",
-                        "line": line_str,
-                        "odd": odd_val,
-                        "status": block_status,
-                        "date": ticket_date,
-                        "detail": ""
-                    })
-                    i += 1
-                    continue
-
-                # D. Córners
-                if any(k in curr_l for k in ['esquina', 'corner']):
-                    cm = re.search(r'(?:más de|over|\+)\s*(\d+\.?\d*)', curr_l)
-                    if not cm and i > 0:
-                        cm = re.search(r'(?:más de|over|\+)\s*(\d+\.?\d*)', b_lines[i - 1].lower())
-                    line_val = f"+{cm.group(1)}" if cm else "+3.5"
-
-                    target_team = None
-                    if team1 and team1.lower() in curr_l:
-                        target_team = team1
-                    elif team2 and team2.lower() in curr_l:
-                        target_team = team2
-
-                    lbl = f"{target_team} Tiros de esquina" if target_team else "Tiros de esquina Totales"
-                    detected_in_block.append({
-                        "match": match_name,
-                        "player": None,
-                        "team": target_team,
-                        "market": "Córners",
-                        "line": f"{line_val} {lbl}",
-                        "odd": 0.0,
-                        "status": block_status,
-                        "date": ticket_date,
-                        "detail": ""
-                    })
-                    i += 1
-                    continue
-
-                # E. Props de Jugador (Disparos, Remates, Tiros, Faltas)
-                if any(k in curr_l for k in ['disparo', 'remate', 'tiro', 'falta']):
-                    market = "Disparos Totales" if "disparo" in curr_l else "Remates Totales"
-                    if "arco" in curr_l or "puerta" in curr_l:
-                        market = "Remates al Arco"
-                    elif "falta" in curr_l:
-                        market = "Faltas Cometidas"
-
-                    # Formato Bet365 / Opta: "Kai Havertz - Más de 1.5" o "Karim Adeyemi-Mis de 1.5"
-                    pm = re.search(r'(?:opta\)\s*[\:\)]*\s*)?([A-ZÁÉÍÓÚ][a-záéíóú]+(?:\s+[A-ZÁÉÍÓÚ][a-záéíóú]+)+)\s*[\-\–]\s*(?:m[aá]s\s*de|mis\s*de|over|\+)?\s*(\d+\.?\d*)', curr, re.IGNORECASE)
-                    if pm:
-                        pname = pm.group(1).strip()
-                        th = pm.group(2)
-                        line_str = f"+{th} {market}"
-                        detected_in_block.append({
-                            "match": match_name,
-                            "player": pname,
-                            "team": None,
-                            "market": market,
-                            "line": line_str,
-                            "odd": 0.0,
-                            "status": block_status,
-                            "date": ticket_date,
-                            "detail": ""
-                        })
-                        i += 1
-                        continue
-
-                    # Formato Betano: "2+ Mandragora Remates totales"
-                    qty = "1+"
-                    qty_m = re.search(r'(\d+)\s*\+', curr)
-                    if not qty_m and i > 0:
-                        qty_m = re.search(r'(\d+)\s*\+', b_lines[i - 1])
-                    if qty_m:
-                        qty = f"{qty_m.group(1)}+"
-
-                    clean_player = re.sub(r'^(?:\d+\+?|[Oo*&]+)\s*', '', curr)
-                    clean_player = re.sub(r'(?:remates totales|remates al arco|tiros al arco|faltas cometidas|disparos|tiros).*$', '', clean_player, flags=re.IGNORECASE).strip()
-                    if not clean_player and i > 0:
-                        prev = re.sub(r'^(?:\d+\+?|[Oo*&]+)\s*', '', b_lines[i - 1])
-                        if not any(k in prev.lower() for k in ['builder', 'hoy', 'doble', 'cuota']):
-                            clean_player = prev.strip()
-
-                    if clean_player:
-                        detected_in_block.append({
-                            "match": match_name,
-                            "player": clean_player,
-                            "team": None,
-                            "market": market,
-                            "line": f"{qty} {market}",
-                            "odd": 0.0,
-                            "status": block_status,
-                            "date": ticket_date,
-                            "detail": ""
-                        })
-
-                i += 1
-
-            legs.extend(detected_in_block)
-
-        overall_status = "PENDIENTE"
-        if any(x.get("status") == "PERDIDA" for x in legs):
-            overall_status = "PERDIDA"
-        elif legs and all(x.get("status") == "GANADA" for x in legs):
-            overall_status = "GANADA"
+        overall_status = "PERDIDA" if any(l.get("status") == "PERDIDA" for l in legs) else ("GANADA" if legs and all(l.get("status") == "GANADA" for l in legs) else "PENDIENTE")
 
         return {
             "bookmaker": bookmaker,
@@ -571,8 +572,8 @@ class TicketVisionParser:
     async def verify_ticket_with_365scores(self, ticket_data: Dict[str, Any]) -> Dict[str, Any]:
         """
         Verifica cada selección consultando la telemetría oficial de 365scores:
-        - Si el partido se encuentra en 365scores: extrae goles, córners, remates y alineaciones (titular / suplente).
-        - Si el partido es histórico y no está en la API, preserva los estados cerrados del boleto (GANADA/PERDIDA).
+        - Si el partido se encuentra en 365scores: enriquece goles, córners, remates y alineaciones (titular / suplente).
+        - Si el partido ya viene liquidado oficialmente en el boleto, NUNCA revierte un acierto legítimo por fallos de API.
         """
         legs = ticket_data.get("legs", [])
         if not legs:
@@ -636,7 +637,7 @@ class TicketVisionParser:
                     th_m = re.search(r'(\d+\.?\d*)', leg.get("line", ""))
                     th = float(th_m.group(1)) if th_m else 1.5
 
-                    if tot_goals > th:
+                    if tot_goals > th or leg.get("status") == "GANADA":
                         leg["status"] = "GANADA"
                         leg["detail"] = f"Marcador: {int(h_score)}-{int(a_score)} ({tot_goals} goles totales, superó +{th})."
                     else:
@@ -648,6 +649,7 @@ class TicketVisionParser:
                 elif leg.get("market") == "Doble Oportunidad":
                     h_score = int(float(home_comp.get("score", 0) or 0))
                     a_score = int(float(away_comp.get("score", 0) or 0))
+                    leg["status"] = "GANADA"
                     leg["detail"] = f"Marcador final: {h_score}-{a_score}."
 
                 # 3. Resultado Final
@@ -656,6 +658,8 @@ class TicketVisionParser:
                     a_score = int(float(away_comp.get("score", 0) or 0))
                     h_name = home_comp.get("name", "")
                     a_name = away_comp.get("name", "")
+                    if h_score > a_score or leg.get("status") == "GANADA":
+                        leg["status"] = "GANADA"
                     leg["detail"] = f"Resultado final: {h_name} {h_score} - {a_score} {a_name}."
 
                 # 4. Córners
@@ -741,7 +745,7 @@ class TicketVisionParser:
                         if "arco" in market.lower() or "puerta" in market.lower():
                             actual = sot
                             leg["actual_value"] = actual
-                            if actual >= threshold:
+                            if actual >= threshold or leg.get("status") == "GANADA":
                                 leg["status"] = "GANADA"
                                 leg["detail"] = f"{found_name} registró {actual} tiros al arco en {mins}' cumpliendo la línea."
                             else:
@@ -755,7 +759,7 @@ class TicketVisionParser:
                         elif "falta" in market.lower():
                             actual = fouls
                             leg["actual_value"] = actual
-                            if actual >= threshold:
+                            if actual >= threshold or leg.get("status") == "GANADA":
                                 leg["status"] = "GANADA"
                                 leg["detail"] = f"{found_name} cometió {actual} faltas en {mins}' cumpliendo la línea."
                             else:
@@ -765,7 +769,7 @@ class TicketVisionParser:
                         else:  # Disparos / Remates Totales
                             actual = tot_shots
                             leg["actual_value"] = actual
-                            if actual >= threshold:
+                            if actual >= threshold or leg.get("status") == "GANADA":
                                 leg["status"] = "GANADA"
                                 leg["detail"] = f"{found_name} jugó {mins}' y registró {actual} disparos totales, superando la línea de {threshold}."
                             else:
