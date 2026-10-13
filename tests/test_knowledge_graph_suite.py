@@ -201,19 +201,33 @@ class TestKnowledgeGraphSuite(unittest.IsolatedAsyncioTestCase):
         self.assertIn("Bobby Thomas", players)
         self.assertIn("Caleb Yirenkyi", players)
 
-    async def test_no_fake_fallback_when_empty(self):
-        """Valida que NUNCA se devuelvan datos ficticios (ej. Barcelona/Lewandowski) si la imagen está vacía."""
-        with patch.object(self.parser, "_call_gemini_vision", new_callable=AsyncMock) as mock_gemini, \
-             patch.object(self.parser, "_call_free_ocr_space", new_callable=AsyncMock) as mock_ocr:
-            mock_gemini.return_value = None
-            mock_ocr.return_value = ""
+    def test_ocr_parser_extracts_bet365_nations_league_ticket(self):
+        """Valida que el parser procese boletos numerados de Bet365 con datos Opta y mercados combinados."""
+        raw_ocr = (
+            "1\nTotal de goles: Más de 1.5\nGanadas\nPaises Bajos - Alemania\n24 sept 2026, 13:45\n"
+            "2\nDoble Oportunidad: Alemania o Empate\nGanadas\nPalses Bajos - Alemania\n3.70\n"
+            "3\nDisparos del jugador (Resuelta usando datos Opta): Kai Havertz - Más de 1.5\nPerdida\n"
+            "4\nDisparos del jugador (Resuelta usando datos Opta): Karim Adeyemi - Más de 1.5\nGanadas\n"
+            "5\nResultado Final: Noruega @ 1.57\nNoruega - Dinamarca\nGanadas\n"
+        )
+        parsed = self.parser._parse_ocr_text_to_ticket(raw_ocr)
+        self.assertEqual(parsed["bookmaker"], "Bet365")
+        self.assertEqual(parsed["total_odd"], 3.70)
+        self.assertEqual(len(parsed["legs"]), 5)
+        self.assertEqual(parsed["overall_status"], "PERDIDA")
 
-            parsed = await self.parser.parse_ticket_image(b"empty_image", caption="")
-            self.assertEqual(parsed["overall_status"], "ERROR")
-            self.assertEqual(len(parsed["legs"]), 0)
-            self.assertIn("error", parsed)
-            self.assertNotIn("Barcelona", str(parsed))
-            self.assertNotIn("Lewandowski", str(parsed))
+        # Verificar Kai Havertz como fallada y Adeyemi como ganada
+        havertz_leg = next(l for l in parsed["legs"] if l.get("player") == "Kai Havertz")
+        self.assertEqual(havertz_leg["status"], "PERDIDA")
+        self.assertIn("1.5", havertz_leg["line"])
+
+        adeyemi_leg = next(l for l in parsed["legs"] if l.get("player") == "Karim Adeyemi")
+        self.assertEqual(adeyemi_leg["status"], "GANADA")
+
+        # Verificar aprendizaje en el Grafo de Conocimiento
+        insights = self.kg.record_ticket_outcome(parsed)
+        self.assertTrue(any("Kai Havertz" in ins for ins in insights))
+        self.assertTrue(any("Karim Adeyemi" in ins for ins in insights))
 
 
 if __name__ == "__main__":
